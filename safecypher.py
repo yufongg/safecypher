@@ -19,7 +19,8 @@ from tabulate import tabulate
 from pyngrok import ngrok
 from packaging import version
 from termcolor import colored
-
+from pyvis.network import Network
+from contextlib import redirect_stdout
 
 data_queue = queue.Queue()
 
@@ -160,6 +161,76 @@ def check_vulnerability(apoc_version):
             print(f"[*] {advisory}")
     else:
         print(f"APOC Version {apoc_version} is not affected by the known vulnerabilities.")
+
+
+class NetworkVisualizer:
+    def __init__(self, output_directory):
+        self.output_directory = output_directory
+
+    def get_relationships(self, filename):
+        lines = []
+        with open(filename, 'r') as file:
+            for line in file:
+                line = line.strip()
+                lines.append(line)
+        return lines
+
+    def read_json_file(self, json_file_path):
+        with open(json_file_path, 'r') as file:
+            data = json.load(file)
+        return data
+
+    def visualize_network(self):
+        relationship_file = os.path.join(self.output_directory, "relationships.txt")
+        json_files = [os.path.join(self.output_directory, f) for f in os.listdir(self.output_directory) if f.endswith('.json')]
+        relationships = self.get_relationships(relationship_file)
+
+        # Create a PyVis network
+        net = Network(notebook=True, height="1750px", width="100%", bgcolor="#222222", font_color="white", directed=True, select_menu=True, cdn_resources='remote')
+        
+        # Add nodes and edges from relationships
+        for rel in relationships:
+            properties_text_target = ""
+            properties_text_source = ""
+            parts = rel.split('-')
+            source, relation, target = parts[0], parts[1].split(':')[1][:-1], parts[2].split('>')[1]
+            source_name_label = target_name_label = ""
+            
+            for json_file in json_files:
+                node_properties = self.read_json_file(json_file)
+                for key, entry in node_properties.items():
+                    if key == source.split(":")[1]:
+                        properties_text_source, source_name_label = self.extract_properties(entry, source, 'name')
+                    elif key == target.split(":")[1]:
+                        properties_text_target, target_name_label = self.extract_properties(entry, target, 'title', 'name')
+                        
+            net.add_node(source, label=source_name_label, font={'size': 10}, title=properties_text_source, borderWidth=3)
+            net.add_node(target, label=target_name_label, font={'size': 10}, title=properties_text_target, borderWidth=3)
+            net.add_edge(source, target, label=relation, font={'size': 9}, color="red")
+
+        self.configure_network(net)
+        with open(os.devnull, 'w') as f, redirect_stdout(f):
+            net.show('output/network.html')
+        
+        print(colored(f"\n[!] View node relationship graph: file://{os.getcwd()}/output/network.html", "yellow"))
+
+    def extract_properties(self, properties, default_label, *lookup_keys):
+        label = default_label
+        properties_text = f"ID: {default_label.split(':')[1]}\n"
+        for key, value in properties.items():
+            if key in lookup_keys and not label:
+                label = value
+            properties_text += f"{key}: {value} \n"
+        return properties_text, label
+
+    def configure_network(self, net):
+        net.barnes_hut()
+        net.options.physics.enabled = True
+        net.options.physics.barnesHut.gravitationalConstant = -2000
+        net.options.physics.barnesHut.springLength = 100
+        net.options.physics.barnesHut.springConstant = 0.05
+        net.options.physics.barnesHut.overlap = 1
+
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -448,8 +519,7 @@ class oob_Neo4jInjector:
             print(f"\n[*] OLD: {old_node_count}, NEW: {node_count}")
             print(colored("[!] Detected an increase in node count, probably injected into a CREATE clause, cleaning up...", "yellow"))
             self.inject_payload(f" RETURN 1 as x UNION MATCH (n) WHERE ANY(key IN keys(n) WHERE n[key] IN [{self.random_num}, '{self.random_num}']) AND NOT EXISTS ((n)--()) DETACH DELETE n RETURN 1337 as x//")
-        else:
-            print("done, no increase in node count")
+
 
     def oob_dump_all(self):
         labels = self.dump_labels()
@@ -1100,6 +1170,8 @@ def main():
             injector.oob_dump_all()
             injector.dump_rels()
             injector.clean_up(old_node_count)
+            visualizer = NetworkVisualizer(output_directory=os.getcwd() + '/output/')
+            visualizer.visualize_network()
             
 
         elif args.labels:
@@ -1126,6 +1198,8 @@ def main():
             old_node_count = injector.find_node_count()
             injector.dump_rels()
             injector.clean_up(old_node_count)
+            visualizer = NetworkVisualizer(output_directory=os.getcwd() + '/output/')
+            visualizer.visualize_network()
 
         listener.stop_listener()
         listener_thread.join()
@@ -1148,6 +1222,8 @@ def main():
         if args.dump_all:
             injector.ib_dump_all()
             injector.dump_rels()
+            visualizer = NetworkVisualizer(output_directory=os.getcwd() + '/output/')
+            visualizer.visualize_network()
 
         elif args.labels:
             label_count = injector.find_label_count()
@@ -1176,6 +1252,8 @@ def main():
         
         elif args.relationships:
             injector.dump_rels()
+            visualizer = NetworkVisualizer(output_directory=os.getcwd() + '/output/')
+            visualizer.visualize_network()
 
     else:
         print(colored("Choose: [--in-band/--out-of-band]", "red"))
