@@ -370,7 +370,7 @@ class oob_Neo4jInjector:
             f"{self.random_num}\"",
             f"{self.random_num}'}})",
             f"{self.random_num}\"}})",
-            f"{self.random_num}1"
+            f"{self.random_num}"
         ]
         for injection_character in injection_characters:
             print(f"[{animation[anim_index % len(animation)]}] Checking injectability with LOAD CSV", end='\r', flush=True)
@@ -769,7 +769,7 @@ class ib_Neo4jInjector:
             #                 break
             #         if (break_flag):
             #             break
-            print(" " * 150, end='\r')
+            print(" " * 70, end='\r')
             print(f"[+] {label.get_whole()}")
             labels.append(label.get_whole())
         return labels
@@ -879,7 +879,7 @@ class ib_Neo4jInjector:
                 #                     break 
                 #         if (break_flag):
                 #             break
-                print(" " * 150, end='\r') 
+                print(" " * 70, end='\r') 
                 print(f"[++] {pr0perty.get_whole()}")
                 if label in properties_dict:
                     properties_dict[label].append(pr0perty.get_whole())
@@ -1005,7 +1005,7 @@ class ib_Neo4jInjector:
                     #                 break  # Found the size for this occurrence, no need to continue
                     #         if (break_flag):
                     #             break
-                    print(" " * 150, end='\r') 
+                    print(" " * 70, end='\r') 
                     print(f"[+++] {''.join(value.get_whole().split('::')[1::])}")
 
                     values_dict[label][pr0perty][count_index] = value.get_whole()
@@ -1202,7 +1202,7 @@ class ib_Neo4jInjector:
                 #                     break 
                 #         if (break_flag):
                 #             break
-                print(" " * 150, end='\r') 
+                print(" " * 70, end='\r') 
                 print(f"[++] {rel.get_whole()}")
                 rels_dict[rel_type] = rel.get_whole()
         return rels_dict
