@@ -38,7 +38,12 @@
     + [Complex Query Simulation](#complex-query-simulation)
   * [Inspiration](#inspiration)
 
-# SafeCypher
+# SafeCypher [![SafeCypher](misc/images/safecypher.png)]
+
+
+
+ [![Python 3.x](https://img.shields.io/badge/python-3.x-blue.svg)](https://www.python.org/) 
+
 
 SafeCypher is a comprehensive tool designed to aid developers and penetration testers in evaluating the security measures of web servers that interact with Neo4j databases. It provides two primary methods for data exfiltration and supports testing across GET/POST/API endpoints.
 
@@ -166,7 +171,7 @@ For those who prefer working within a virtual environment to avoid altering syst
 	```bash
 	git clone https://github.com/yufongg/safecypher.git
 	cd safecypher
-	pip3 install -r virtual_env_requirements.txt
+	pip3 install -r requirements.txt
 	```
 
 
@@ -252,6 +257,7 @@ options:
   -R, --relationships   Dump all relationships in the database
   -t THREADS, --threads THREADS
 ```
+
 
 ### Out-of-band (LOADCSV/APOC.LOAD.CSV/JSON)
 
@@ -369,14 +375,12 @@ options:
 
 #### Utilizing Ngrok for Public Testing
 
-Only for out-of-band injection
-
 1. Set Ngrok authtoken.
 	```
 	┌──(root💀kali)-[~/tools/web/safecypher]
 	└─$ export NGROK_AUTHTOKEN=<your token>
 	```
-1. Change the interface to 'public' for wide-reaching tests, allowing SafeCypher to perform comprehensive assessments on accessible Neo4j databases.
+2. Change the interface to 'public' for wide-reaching tests, allowing SafeCypher to perform comprehensive assessments on accessible Neo4j databases.
 	```
 	# change -i to public
 	┌──(root💀kali)-[~/tools/web/safecypher]
