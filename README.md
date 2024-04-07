@@ -231,7 +231,7 @@ Ensure you have Docker and Docker-compose installed on your machine. For install
 	cd custom
 	``` 
 3. Launch the vulnerable server environment using Docker-compose:
-	```css
+	```bash
 	docker-compose up --build
 	```
 
