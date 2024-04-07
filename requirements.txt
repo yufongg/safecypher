@@ -2,3 +2,6 @@ requests
 netifaces
 tabulate
 pyngrok
+packaging
+termcolor
+pyvis

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Query Keyboards</title>
+    <link href="../static/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+
+<div class="container mt-5">
+    <h2>Query Keyboards [']</h2>
+    <form action="/search1" method="post" class="form-inline my-2 my-lg-0">
+        <input class="form-control mr-sm-2" type="search" placeholder="Keyboard Name" aria-label="Search" name="keyboard_name">
+        <button class="btn btn-outline-success my-2 my-sm-0" type="submit">Search</button>
+    </form>
+    {% if search_type == 'search1' %}
+        {% if keyboards %}
+            <ul class="list-group mt-3">
+            {% for keyboard in keyboards %}
+                <li class="list-group-item">
+                    <strong>{{ keyboard.name }}</strong>: {{ keyboard.description }}
+                </li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No keyboards found.</p>
+        {% endif %}
+    {% endif %}
+</div>
+
+<div class="container mt-5">
+    <h2>Query Keyboards ["]</h2>
+    <form action="/search2" method="post" class="form-inline my-2 my-lg-0">
+        <input class="form-control mr-sm-2" type="search" placeholder="Keyboard Name" aria-label="Search" name="keyboard_name">
+        <button class="btn btn-outline-success my-2 my-sm-0" type="submit">Search</button>
+    </form>
+    {% if search_type == 'search2' %}
+        {% if keyboards %}
+            <ul class="list-group mt-3">
+            {% for keyboard in keyboards %}
+                <li class="list-group-item">
+                    <strong>{{ keyboard.name }}</strong>: {{ keyboard.description }}
+                </li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No keyboards found.</p>
+        {% endif %}
+    {% endif %}
+</div>
+
+<div class="container mt-5">
+    <h2>Query Keyboards [Number/ID]</h2>
+    <form action="/search3" method="post" class="form-inline my-2 my-lg-0">
+        <input class="form-control mr-sm-2" type="search" placeholder="Keyboard Name" aria-label="Search" name="keyboard_name">
+        <button class="btn btn-outline-success my-2 my-sm-0" type="submit">Search</button>
+    </form>
+    {% if search_type == 'search3' %}
+        {% if keyboards %}
+            <ul class="list-group mt-3">
+            {% for keyboard in keyboards %}
+                <li class="list-group-item">
+                    <strong>{{ keyboard.name }}</strong>: {{ keyboard.description }}
+                </li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No keyboards found.</p>
+        {% endif %}
+    {% endif %}
+</div>
+
+<div class="container mt-5">
+    <h2>Query Keyboards ['})]</h2>
+    <form action="/search4" method="post" class="form-inline my-2 my-lg-0">
+        <input class="form-control mr-sm-2" type="search" placeholder="Keyboard Name" aria-label="Search" name="keyboard_name">
+        <button class="btn btn-outline-success my-2 my-sm-0" type="submit">Search</button>
+    </form>
+    {% if search_type == 'search4' %}
+        {% if keyboards %}
+            <ul class="list-group mt-3">
+            {% for keyboard in keyboards %}
+                <li class="list-group-item">
+                    <strong>{{ keyboard.name }}</strong>: {{ keyboard.description }}
+                </li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No keyboards found.</p>
+        {% endif %}
+    {% endif %}
+</div>
+
+<div class="container mt-5">
+    <h2>Query Keyboards ["})]</h2>
+    <form action="/search5" method="post" class="form-inline my-2 my-lg-0">
+        <input class="form-control mr-sm-2" type="search" placeholder="Keyboard Name" aria-label="Search" name="keyboard_name">
+        <button class="btn btn-outline-success my-2 my-sm-0" type="submit">Search</button>
+    </form>
+    {% if search_type == 'search5' %}
+        {% if keyboards %}
+            <ul class="list-group mt-3">
+            {% for keyboard in keyboards %}
+                <li class="list-group-item">
+                    <strong>{{ keyboard.name }}</strong>: {{ keyboard.description }}
+                </li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No keyboards found.</p>
+        {% endif %}
+    {% endif %}
+</div>
+
+</body>
+</html>

@@ -166,7 +166,7 @@ For those who prefer working within a virtual environment to avoid altering syst
 	```bash
 	git clone https://github.com/yufongg/safecypher.git
 	cd safecypher
-	pip3 install -r requirements.txt
+	pip3 install -r virtual_env_requirements.txt
 	```
 
 
