@@ -38,7 +38,9 @@
     + [Complex Query Simulation](#complex-query-simulation)
   * [Inspiration](#inspiration)
 
-# SafeCypher 
+# SafeCypher [![SafeCypher](misc/images/safecypher.png)]
+
+
 
  [![Python 3.x](https://img.shields.io/badge/python-3.x-blue.svg)](https://www.python.org/) 
 
@@ -512,3 +514,11 @@ The development of SafeCypher was inspired by a number of existing tools and res
 - **Cyphermap**: [GitHub - sectroyer/cyphermap: A tool for mapping cypher databases](https://github.com/sectroyer/cyphermap/tree/main)
 
 We extend our gratitude to the developers and researchers behind these pioneering tools and resources. Their work has significantly has been instrumental in shaping the features and capabilities of SafeCypher.
+
+# Credits
+
+- Yu Fong
+- Thaddeus
+- Melvin
+- Darius
+- Ray Son
