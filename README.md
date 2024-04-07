@@ -153,19 +153,19 @@ Our testing environment supports three methods to initiate queries, catering to 
 1. GET
 	```
 	┌──(root💀kali)-[~/tools/web/safecypher]
-	└─$ curl -s -H "Cookie: session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhKfjw.rU_DUrZpy1MmUTkl78sfEG3V824" http://127.0.0.1:5000/search1?keyboard_name=Kohaku  | grep Kohaku
+	└─$ curl -s http://127.0.0.1:5000/search1?keyboard_name=Kohaku -H "Cookie: session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhKfjw.rU_DUrZpy1MmUTkl78sfEG3V824"   | grep Kohaku
 	                    <strong>Kohaku</strong>: Singakbd
 	```
 2. POST
 	```
 	┌──(root💀kali)-[~/tools/web/safecypher]
-	└─$ curl -s -H "Cookie: session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhKfjw.rU_DUrZpy1MmUTkl78sfEG3V824" http://127.0.0.1:5000/search1 -d "keyboard_name=Kohaku" | grep Kohaku
+	└─$ curl -s http://127.0.0.1:5000/search1 -d "keyboard_name=Kohaku" -H "Cookie: session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhKfjw.rU_DUrZpy1MmUTkl78sfEG3V824"  | grep Kohaku
 	                    <strong>Kohaku</strong>: Singakbd
 	```
 3. API
 	```
 	┌──(root💀kali)-[~/tools/web/safecypher]
-	└─$ curl -s -H "Cookie: session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhKfjw.rU_DUrZpy1MmUTkl78sfEG3V824" http://127.0.0.1:5000/api1/keyboard_name/Kohaku  | grep Kohaku
+	└─$ curl -s http://127.0.0.1:5000/api1/keyboard_name/Kohaku -H "Cookie: session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhKfjw.rU_DUrZpy1MmUTkl78sfEG3V824"  | grep Kohaku
 	{"keyboards":[{"description":"Singakbd","name":"Kohaku"}]}
 	```
 
