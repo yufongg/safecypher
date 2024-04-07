@@ -500,7 +500,7 @@ options:
 
 ## Screenshots
 
-![Boolean-Based Injection Dump all](misc/images/blind_bool_dump_all.mp4)
+![Boolean-Based Injection Dump all](https://youtu.be/jW__FKG_mp0)
 
 ![Load CSV Dump all](misc/images/load_csv_dump_all.png)
 
