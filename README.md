@@ -17,6 +17,8 @@
          - [Field 3: Numeric or Blank Payloads](#field-3-numeric-or-blank-payloads)
          - [Field 4: Complex Payload Termination ('})](#field-4-complex-payload-termination-)
          - [Field 5: Complex Payload Termination ("})](#field-5-complex-payload-termination-)
+   * [Querying Methods](#querying-methods)
+      + [Examples](#examples)
    * [Continuous Refinement and Security Insights](#continuous-refinement-and-security-insights)
 - [Getting Started](#getting-started)
    * [Safecypher Installation](#safecypher-installation)
