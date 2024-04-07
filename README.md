@@ -1,6 +1,7 @@
 
 # Table of Content
 
+- [Table of Content](#table-of-content)
 - [SafeCypher](#safecypher)
   * [Features](#features)
     + [LOAD CSV Method](#load-csv-method)
@@ -36,9 +37,13 @@
 - [Future Plans](#future-plans)
     + [Enhanced Input Handling](#enhanced-input-handling)
     + [Complex Query Simulation](#complex-query-simulation)
-  * [Inspiration](#inspiration)
+- [Inspiration](#inspiration)
+- [Credits](#credits)
 
-# SafeCypher [![SafeCypher](misc/images/safecypher.png)]
+
+
+
+# SafeCypher 
 
 
 
@@ -505,7 +510,8 @@ One of our immediate goals is to refine SafeCypher's input handling capabilities
 ### Complex Query Simulation
 
 Our testing environment serves as a crucial part of SafeCypher's development, providing a sandbox for thorough testing and refinement. Moving forward, we plan to introduce more complex queries into this environment. By simulating a broader range of potential vulnerabilities and attack scenarios, we will be able to further hone SafeCypher's detection and exfiltration mechanisms, ensuring it remains a robust tool against evolving security threats.
-## Inspiration
+
+# Inspiration
 
 The development of SafeCypher was inspired by a number of existing tools and resources within the cybersecurity domain. These tools have paved the way for advancements in security testing and have provided invaluable insights into the complexities of database security. Below are some of the tools and resources that have influenced the creation of SafeCypher:
 
