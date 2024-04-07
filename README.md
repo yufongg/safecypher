@@ -100,10 +100,9 @@ If the exfiltration is successfull, we have the capability, through PyVis, to vi
 
 The development of SafeCypher was inspired by the realization that web attacks targeting Neo4j databases are not widely recognized within the cybersecurity community. There's a notable scarcity of readily accessible information and resources on this specific topic, which poses a challenge for developers and security professionals aiming to understand and mitigate such vulnerabilities.
 
-In response to this, SafeCypher was created with the intention to fill this gap by providing a tool that not only aids in identifying and addressing Cypher injection vulnerabilities but also contributes to the broader body of knowledge on securing Neo4j databases against web attacks. Throughout the development process, I focused on generating payloads tailored for these vulnerabilities—many of which have seen limited availability online until now.
+In response to this, SafeCypher was created with the intention to fill this gap by providing a tool that not only aids in identifying and addressing Cypher injection vulnerabilities but also contributes to the broader body of knowledge on securing Neo4j databases against web attacks. Throughout the development process, we focused on generating payloads tailored for these vulnerabilities—many of which have seen limited availability online until now.
 
-The primary goal of SafeCypher is to enhance awareness about the security challenges associated with Neo4j databases and to equip the cybersecurity community with more tools to defend against advanced web attacks. By sharing this tool, I hope to encourage further exploration, discussion, and advancement in the field of database security.
-
+The primary goal of SafeCypher is to enhance awareness about the security challenges associated with Neo4j databases and to equip the cybersecurity community with more tools to defend against advanced web attacks.
 
 
 # Testing Methodology
