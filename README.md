@@ -500,10 +500,14 @@ options:
 
 ## Screenshots
 
-![Boolean-Based Injection Dump all](https://youtu.be/jW__FKG_mp0)
-
+Out-of-band: LOADCSV/APOC.LOAD.CSV/JSON
 ![Load CSV Dump all](misc/images/load_csv_dump_all.png)
 
+
+In-Band: Boolean-Based Injection Dump all
+[![Boolean-Based Injection Dump all](misc/images/safecypher.png)](https://youtu.be/jW__FKG_mp0)
+
+Pyvis Node Display
 ![Pyvis Node Display](misc/images/graph.png)
 
 # Future Plans
