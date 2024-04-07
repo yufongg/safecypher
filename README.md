@@ -38,9 +38,7 @@
     + [Complex Query Simulation](#complex-query-simulation)
   * [Inspiration](#inspiration)
 
-# SafeCypher [![SafeCypher](misc/images/safecypher.png)]
-
-
+# SafeCypher 
 
  [![Python 3.x](https://img.shields.io/badge/python-3.x-blue.svg)](https://www.python.org/) 
 
