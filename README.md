@@ -197,15 +197,15 @@ This method installs SafeCypher and its dependencies globally on your system.
 For those who prefer working within a virtual environment to avoid altering system-wide packages, follow these steps: 
 
 
-1. **Create a Virtual Environment** : Generate a new virtual environment by running:
+1. **Create a Virtual Environment** 
 	```bash
 	virtualenv venv3 -p $(which python3)
 	```
-2. **Activate the Virtual Environment** : Before installing the dependencies, activate the newly created virtual environment:
+2. **Activate the Virtual Environment** 
 	```bash
 	source venv3/bin/activate
 	```
-3. **Clone the Repository and Install Dependencies** : Finally, clone the SafeCypher repository and install the required Python packages in your virtual environment:
+3. **Clone the Repository and Install Dependencies** 
 	```bash
 	git clone https://github.com/yufongg/safecypher.git
 	cd safecypher
