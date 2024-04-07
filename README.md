@@ -500,7 +500,11 @@ options:
 
 ## Screenshots
 
-![](README-20240407152312452.png)
+[![Boolean-Based Injection Dump all](misc/images/blind_bool_dump_all.mp4)]
+
+[![Load CSV Dump all](misc/images/load_csv_dump_all.png)]
+
+[![Pyvis Node Display](misc/images/graph.png)]
 
 # Future Plans
 ### Enhanced Input Handling
