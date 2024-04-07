@@ -1,3 +1,43 @@
+
+# Table of Content
+
+- [SafeCypher](#safecypher)
+  * [Features](#features)
+    + [LOAD CSV Method](#load-csv-method)
+      - [Ngrok Integration for Out-of-Band Data Exfiltration](#ngrok-integration-for-out-of-band-data-exfiltration)
+    + [Blind Boolean Method](#blind-boolean-method)
+      - [Threading](#threading)
+    + [Visualizing Data Relationships](#visualizing-data-relationships)
+  * [Background](#background)
+- [Testing Methodology](#testing-methodology)
+  * [Testing Environment Setup](#testing-environment-setup)
+    + [Testing Scenarios and Methodologies](#testing-scenarios-and-methodologies)
+      - [Field 1: Apostrophe Injection (')](#field-1--apostrophe-injection----)
+      - [Field 2: Quotation Injection (")](#field-2--quotation-injection----)
+      - [Field 3: Numeric or Blank Payloads](#field-3--numeric-or-blank-payloads)
+      - [Field 4: Complex Payload Termination ('})](#field-4--complex-payload-termination-----)
+      - [Field 5: Complex Payload Termination ("})](#field-5--complex-payload-termination-----)
+  * [Continuous Refinement and Security Insights](#continuous-refinement-and-security-insights)
+- [Getting Started](#getting-started)
+  * [Safecypher Installation](#safecypher-installation)
+    + [Standard Installation](#standard-installation)
+    + [Using a Virtual Environment](#using-a-virtual-environment)
+  * [Vulnerable Neo4j Server Installation](#vulnerable-neo4j-server-installation)
+    + [Prerequisites](#prerequisites)
+    + [Setup Instructions](#setup-instructions)
+    + [Accessing the Services](#accessing-the-services)
+    + [Important Notes](#important-notes)
+  * [Usage](#usage)
+    + [Help](#help)
+    + [Out-of-band (LOADCSV/APOC.LOAD.CSV/JSON)](#out-of-band--loadcsv-apocloadcsv-json-)
+      - [Utilizing Ngrok for Public Testing](#utilizing-ngrok-for-public-testing)
+    + [In-Band (Blind Boolean)](#in-band--blind-boolean-)
+  * [Screenshots](#screenshots)
+- [Future Plans](#future-plans)
+    + [Enhanced Input Handling](#enhanced-input-handling)
+    + [Complex Query Simulation](#complex-query-simulation)
+  * [Inspiration](#inspiration)
+
 # SafeCypher
 
 SafeCypher is a comprehensive tool designed to aid developers and penetration testers in evaluating the security measures of web servers that interact with Neo4j databases. It provides two primary methods for data exfiltration and supports testing across GET/POST/API endpoints.
@@ -28,6 +68,9 @@ To facilitate out-of-band (OOB) data exfiltration in environments where direct a
 
 
 ### Blind Boolean Method
+
+This method is available for Neo4j versions 5.3 and above, taking advantage of the advanced query capabilities introduced in these versions.
+- [Deprecations, additions, and compatibility - Cypher Manual](https://neo4j.com/docs/cypher-manual/current/deprecations-additions-removals-compatibility/#cypher-deprecations-additions-removals-5.3)
 
 Blind Boolean method employs an in-band technique. While this approach is notably slower, it significantly increases the probability of successfully exfiltrating data as it does not depend on the LOAD CSV or APOC procedures, effectively circumventing potential restrictions. The implementation of this technique requires a preliminary true-resulting from the neo4j db input from the user. Following this input, specific syntax (For e.g. `EXISTS' AND EXISTS {} AND '1337' = '1337`) is injected to complete the intended Cypher query and introduce an `AND` clause, coupled with a subquery designed to evaluate to true. This process is conducted meticulously, character by character. Utilizing a Python script, we systematically identify and enumerate the characters that yield a true result. And to allow the original query to complete successfully, we insert the same syntax utilized for injection to append an additional statement, this ensures the original query executes as intended, provided the subquery evaluates to true
 
