@@ -1,7 +1,9 @@
 from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user
 from neo4j import GraphDatabase
+from flask import jsonify
 import os
+
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -162,6 +164,36 @@ def search5():
         keyboard_name = request.args.get('keyboard_name', '')
     keyboard = get_keyboard_by_name5(keyboard_name)
     return render_template('query.html', keyboards=keyboard, search_type='search5')
+
+@app.route('/api1/keyboard_name/<path:keyboard_name>')
+@login_required
+def search_keyboard_name_json1(keyboard_name):
+    keyboard = get_keyboard_by_name1(keyboard_name)
+    return jsonify({"keyboards": keyboard})
+
+@app.route('/api2/keyboard_name/<path:keyboard_name>')
+@login_required
+def search_keyboard_name_json2(keyboard_name):
+    keyboard = get_keyboard_by_name2(keyboard_name)
+    return jsonify({"keyboards": keyboard})
+
+@app.route('/api3/keyboard_name/<path:keyboard_name>')
+@login_required
+def search_keyboard_name_json3(keyboard_name):
+    keyboard = get_keyboard_by_name3(keyboard_name)
+    return jsonify({"keyboards": keyboard})
+
+@app.route('/api4/keyboard_name/<path:keyboard_name>')
+@login_required
+def search_keyboard_name_json4(keyboard_name):
+    keyboard = get_keyboard_by_name4(keyboard_name)
+    return jsonify({"keyboards": keyboard})
+
+@app.route('/api5/keyboard_name/<path:keyboard_name>')
+@login_required
+def search_keyboard_name_json5(keyboard_name):
+    keyboard = get_keyboard_by_name5(keyboard_name)
+    return jsonify({"keyboards": keyboard})
 
 @app.route('/logout')
 def logout():

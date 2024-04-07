@@ -137,6 +137,39 @@ Each field presents a unique challenge by incorporating a specific character or 
 
 - **Objective**: Challenge SafeCypher with another layer of complexity by using "}) to terminate and manipulate the Cypher query execution.
 
+
+## Querying Methods
+
+Our testing environment supports three methods to initiate queries, catering to a variety of testing preferences and requirements: 
+1. **GET Method:**  Queries are appended to the URL as parameters, suitable for quick and direct requests. 
+2. **POST Method:**  Data is sent in the body of the request, often used for operations that include data submission or updates. 
+3. **API Endpoints:**  Custom API routes are provided for a more structured and programmable interaction with the server, ideal for automated testing scripts.
+
+
+### Examples
+
+1. GET
+	```
+	┌──(root💀kali)-[~/tools/web/safecypher]
+	└─$ curl -s -H "Cookie: session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhKfjw.rU_DUrZpy1MmUTkl78sfEG3V824" http://127.0.0.1:5000/search1?keyboard_name=Kohaku  | grep Kohaku
+	                    <strong>Kohaku</strong>: Singakbd
+	```
+2. POST
+	```
+	┌──(root💀kali)-[~/tools/web/safecypher]
+	└─$ curl -s -H "Cookie: session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhKfjw.rU_DUrZpy1MmUTkl78sfEG3V824" http://127.0.0.1:5000/search1 -d "keyboard_name=Kohaku" | grep Kohaku
+	                    <strong>Kohaku</strong>: Singakbd
+	```
+3. API
+	```
+	┌──(root💀kali)-[~/tools/web/safecypher]
+	└─$ curl -s -H "Cookie: session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhKfjw.rU_DUrZpy1MmUTkl78sfEG3V824" http://127.0.0.1:5000/api1/keyboard_name/Kohaku  | grep Kohaku
+	{"keyboards":[{"description":"Singakbd","name":"Kohaku"}]}
+	```
+
+
+
+
 ## Continuous Refinement and Security Insights
 
 This varied testing approach, focusing on different injection characters, is instrumental in enhancing SafeCypher's algorithmic precision and its versatility in identifying vulnerabilities. By subjecting SafeCypher to these diversified injection scenarios, we not only fine-tune its detection and exploitation mechanisms but also deepen our understanding of the myriad ways Neo4j databases can be compromised. 
